@@ -1,5 +1,5 @@
 """
-bo:maitc server - FastAPI 애플리케이션 진입점
+bo:matic server - FastAPI 애플리케이션 진입점
 """
 import pandas as pd
 from fastapi import FastAPI
