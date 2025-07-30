@@ -29,9 +29,19 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     # 사용자 생성
     user = AuthService.create_user(db, user_data.email, user_data.password)
     
-    # 인증 토큰 생성 및 이메일 전송
-    verification_token = secrets.token_urlsafe(32)
-    # 실제로는 토큰을 데이터베이스에 저장해야 하지만 간단히 처리
+    # 인증 토큰 생성 (이메일 정보 포함)
+    import base64
+    import json
+    
+    # 토큰에 이메일 정보 포함 (간단한 방식)
+    token_data = {
+        "email": user_data.email,
+        "random": secrets.token_urlsafe(16)
+    }
+    verification_token = base64.urlsafe_b64encode(
+        json.dumps(token_data).encode()
+    ).decode()
+    
     success = EmailService.send_verification_email(user_data.email, verification_token)
     
     if not success:
@@ -110,7 +120,56 @@ async def refresh_token(token_data: RefreshTokenRequest, db: Session = Depends(g
 
 @router.get("/verify")
 async def verify_email(token: str = Query(...), db: Session = Depends(get_db)):
-    """이메일 인증 (간단한 구현)"""
-    # 실제로는 토큰을 검증하고 해당하는 사용자를 찾아야 합니다
-    # 여기서는 간단히 처리합니다
-    return {"message": "이메일 인증이 완료되었습니다."}
+    """이메일 인증"""
+    try:
+        import base64
+        import json
+        
+        # 토큰에서 이메일 정보 추출
+        try:
+            decoded_data = base64.urlsafe_b64decode(token.encode()).decode()
+            token_data = json.loads(decoded_data)
+            email = token_data.get("email")
+            
+            if not email:
+                raise ValueError("토큰에 이메일 정보가 없습니다")
+                
+        except (ValueError, json.JSONDecodeError) as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="유효하지 않은 인증 토큰입니다."
+            )
+        
+        # 해당 이메일의 사용자 찾기
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다."
+            )
+        
+        # 이미 인증된 사용자인지 확인
+        if user.is_verified:
+            return {
+                "message": "이미 인증된 계정입니다.",
+                "status": "already_verified"
+            }
+        
+        # 사용자 인증 처리
+        user.is_verified = True
+        user.is_active = True  # 인증과 동시에 계정 활성화
+        db.commit()
+        
+        return {
+            "message": f"{email} 계정의 이메일 인증이 완료되었습니다.",
+            "status": "success"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="인증 처리 중 오류가 발생했습니다."
+        )

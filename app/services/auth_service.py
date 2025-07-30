@@ -101,7 +101,7 @@ class AuthService:
     @staticmethod
     def store_refresh_token(db: Session, user_id: int, token: str) -> RefreshToken:
         """리프레시 토큰 저장"""
-        expires_at = datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
         
         # 기존 토큰들을 모두 무효화
         db.query(RefreshToken).filter(RefreshToken.user_id == user_id).update(
@@ -124,7 +124,7 @@ class AuthService:
         db_token = db.query(RefreshToken).filter(
             RefreshToken.token == token,
             RefreshToken.is_revoked == False,
-            RefreshToken.expires_at > datetime.utcnow()
+            RefreshToken.expires_at > datetime.now(timezone.utc)
         ).first()
         return db_token
     
