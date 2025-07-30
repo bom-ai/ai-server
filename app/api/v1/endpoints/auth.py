@@ -114,26 +114,3 @@ async def verify_email(token: str = Query(...), db: Session = Depends(get_db)):
     # 실제로는 토큰을 검증하고 해당하는 사용자를 찾아야 합니다
     # 여기서는 간단히 처리합니다
     return {"message": "이메일 인증이 완료되었습니다."}
-
-
-@router.get("/me")
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
-    """현재 사용자 정보 조회"""
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "is_active": current_user.is_active,
-        "is_verified": current_user.is_verified,
-        "created_at": current_user.created_at
-    }
-
-
-@router.post("/logout")
-async def logout(
-    token_data: RefreshTokenRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """로그아웃 (리프레시 토큰 무효화)"""
-    AuthService.revoke_refresh_token(db, token_data.refreshToken)
-    return {"message": "로그아웃되었습니다."}
