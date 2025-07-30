@@ -31,6 +31,23 @@ class Settings(BaseSettings):
     gemini_api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
     daglo_api_key: Optional[str] = os.getenv("DAGLO_API_KEY")
     
+    # JWT 설정
+    secret_key: str = os.getenv("SECRET_KEY", "temporary-secret-key-for-development")
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60  # 1시간
+    refresh_token_expire_days: int = 7     # 7일
+    
+    # 데이터베이스 설정
+    database_url: Optional[str] = os.getenv("DATABASE_URL", "sqlite:///./bo_matic.db")
+    
+    # 이메일 설정
+    mail_server: Optional[str] = os.getenv("MAIL_SERVER")
+    mail_port: int = int(os.getenv("MAIL_PORT", "587"))
+    mail_username: Optional[str] = os.getenv("MAIL_USERNAME")
+    mail_password: Optional[str] = os.getenv("MAIL_PASSWORD")
+    mail_from: Optional[str] = os.getenv("MAIL_FROM")
+    mail_use_tls: bool = os.getenv("MAIL_USE_TLS", "true").lower() == "true"
+    
     # STT 설정
     stt_max_attempts: int = 150
     stt_poll_interval: int = 2

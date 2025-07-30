@@ -1,9 +1,9 @@
 """
 Pydantic 모델 정의
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional
-
+from datetime import datetime
 
 class STTRequest(BaseModel):
     """STT 요청 모델"""
@@ -46,3 +46,51 @@ class HealthResponse(BaseModel):
     """헬스체크 응답 모델"""
     status: str
     timestamp: str
+
+
+# User Authentication 관련 모델들
+class UserRegister(BaseModel):
+    """회원가입 요청 모델"""
+    email: EmailStr
+    password: str
+
+
+class UserLogin(BaseModel):
+    """로그인 요청 모델"""
+    email: EmailStr
+    password: str
+
+
+class TokenResponse(BaseModel):
+    """토큰 응답 모델"""
+    accessToken: str
+    refreshToken: str
+    expiresIn: int
+
+
+class RefreshTokenRequest(BaseModel):
+    """토큰 갱신 요청 모델"""
+    refreshToken: str
+
+
+class RefreshTokenResponse(BaseModel):
+    """토큰 갱신 응답 모델"""
+    accessToken: str
+    expiresIn: int
+
+
+class RegisterResponse(BaseModel):
+    """회원가입 응답 모델"""
+    message: str
+
+
+class UserInfo(BaseModel):
+    """사용자 정보 모델"""
+    id: int
+    email: str
+    is_active: bool
+    is_verified: bool
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
