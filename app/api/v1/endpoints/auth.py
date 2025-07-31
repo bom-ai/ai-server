@@ -2,6 +2,7 @@
 인증 관련 API 엔드포인트
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from app.models.database import get_db, User
 from app.models.schemas import (
@@ -11,7 +12,9 @@ from app.models.schemas import (
 from app.services.auth_service import AuthService
 from app.services.email_service import EmailService
 from app.api.deps import get_current_user
+from app.core.config import get_settings
 import secrets
+import jwt
 
 router = APIRouter()
 
@@ -29,18 +32,26 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     # 사용자 생성
     user = AuthService.create_user(db, user_data.email, user_data.password)
     
-    # 인증 토큰 생성 (이메일 정보 포함)
-    import base64
-    import json
+    # JWT 기반 인증 토큰 생성
+    settings = get_settings()
     
-    # 토큰에 이메일 정보 포함 (간단한 방식)
-    token_data = {
+    # 토큰 만료 시간 설정 (24시간)
+    expiration = datetime.now(timezone.utc) + timedelta(hours=24)
+
+    token_payload = {
         "email": user_data.email,
-        "random": secrets.token_urlsafe(16)
+        "exp": expiration,
+        "iat": datetime.now(timezone.utc),
+        "type": "email_verification",
+        "jti": secrets.token_urlsafe(32)  # JWT ID for uniqueness
     }
-    verification_token = base64.urlsafe_b64encode(
-        json.dumps(token_data).encode()
-    ).decode()
+
+    # TODO: 토큰 재사용 방지 로직 추가 필요ㄴ
+    verification_token = jwt.encode(
+        token_payload,
+        settings.secret_key,
+        algorithm="HS256"
+    )
     
     success = EmailService.send_verification_email(user_data.email, verification_token)
     
@@ -122,19 +133,30 @@ async def refresh_token(token_data: RefreshTokenRequest, db: Session = Depends(g
 async def verify_email(token: str = Query(...), db: Session = Depends(get_db)):
     """이메일 인증"""
     try:
-        import base64
-        import json
+        settings = get_settings()
         
-        # 토큰에서 이메일 정보 추출
+        # JWT 토큰 검증
         try:
-            decoded_data = base64.urlsafe_b64decode(token.encode()).decode()
-            token_data = json.loads(decoded_data)
-            email = token_data.get("email")
+            payload = jwt.decode(
+                token,
+                settings.secret_key,
+                algorithms=["HS256"]
+            )
             
+            # 토큰 타입 확인
+            if payload.get("type") != "email_verification":
+                raise jwt.InvalidTokenError("잘못된 토큰 타입입니다.")
+            
+            email = payload.get("email")
             if not email:
-                raise ValueError("토큰에 이메일 정보가 없습니다")
+                raise jwt.InvalidTokenError("토큰에 이메일 정보가 없습니다.")
                 
-        except (ValueError, json.JSONDecodeError) as e:
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="인증 토큰이 만료되었습니다. 새로운 인증 이메일을 요청해주세요."
+            )
+        except jwt.InvalidTokenError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="유효하지 않은 인증 토큰입니다."
@@ -149,6 +171,9 @@ async def verify_email(token: str = Query(...), db: Session = Depends(get_db)):
             )
         
         # 이미 인증된 사용자인지 확인
+        # 개선 필요? 이미 인증된 계정일 때 처리 어떻게 할지 
+        #   - Option 1. 200 OK 보내고 따로 명시
+        #   - Option 2. HTTP Exception 보내기 (e.g. 409 CONFLICT)
         if user.is_verified:
             return {
                 "message": "이미 인증된 계정입니다.",
@@ -159,6 +184,13 @@ async def verify_email(token: str = Query(...), db: Session = Depends(get_db)):
         user.is_verified = True
         user.is_active = True  # 인증과 동시에 계정 활성화
         db.commit()
+
+        """
+        TODO: 이메일 인증 시 - 한 번 사용된 토큰 재사용하지 않도록 처리하는 로직 추가해야 할 듯!
+        - 사용된 토큰 기록하는 스키마(클래스) & DB구축 
+        - 토큰을 사용됨으로 표시하는 로직 추가
+        - 만료된 토큰은 정리하는 로직 추가
+        """
         
         return {
             "message": f"{email} 계정의 이메일 인증이 완료되었습니다.",
