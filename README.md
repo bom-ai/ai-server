@@ -61,13 +61,15 @@ bo:matic_server/
 ### 3. AI 텍스트 분석
 
 - Google Gemini AI를 사용한 FGD 텍스트 분석
-- 12개 주제별 분류 및 정리
+- **가변적 분석 항목 지원**: 클라이언트가 제공하는 커스텀 Items로 분석 가능
+- 기본 12개 주제 분류 또는 클라이언트 맞춤형 분석 항목 사용
 - Phase1/Phase2 분석 모드 지원
 
-### 3. 통합 파이프라인
+### 4. 통합 파이프라인
 
 - 음성 파일 → STT → AI 분석의 전체 워크플로우
 - 단일 API 호출로 전체 과정 실행
+- 커스텀 분석 항목을 포함한 전체 파이프라인 지원
 
 ## 설치 및 실행
 
@@ -204,6 +206,8 @@ curl -X POST "http://localhost:8000/api/v1/auth/login" \
 
 ### 3. 인증이 필요한 API 호출
 
+#### 기본 분석 (기본 Items 사용)
+
 ```bash
 curl -X POST "http://localhost:8000/api/v1/analysis/analyze" \
   -H "Content-Type: application/json" \
@@ -211,6 +215,43 @@ curl -X POST "http://localhost:8000/api/v1/analysis/analyze" \
   -d '{
     "text_content": "분석할 텍스트",
     "analysis_type": "phase1"
+  }'
+```
+
+#### 커스텀 Items로 분석
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/analysis/analyze" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -d '{
+    "text_content": "분석할 텍스트",
+    "analysis_type": "phase1",
+    "custom_items": [
+      "브랜드 인지도 및 선호도",
+      "제품 사용 경험 및 만족도",
+      "가격 대비 가치 평가",
+      "경쟁사 대비 차별점",
+      "향후 구매 의향"
+    ]
+  }'
+```
+
+#### 전체 파이프라인 (STT + 분석) - 커스텀 Items 포함
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/pipeline/full-analysis" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "audio_url": "https://example.com/audio.wav",
+    "language": "ko",
+    "enable_speaker_diarization": true,
+    "analysis_type": "phase1",
+    "custom_items": [
+      "브랜드 인지도",
+      "제품 경험",
+      "만족도 평가"
+    ]
   }'
 ```
 
