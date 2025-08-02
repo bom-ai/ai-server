@@ -3,9 +3,10 @@ Gemini AI 서비스
 """
 import google.generativeai as genai
 from fastapi import HTTPException
+from typing import List, Optional
 
 from app.core.config import settings
-from app.core.prompts import SYSTEM_PROMPTS
+from app.core.prompts import generate_system_prompt
 
 
 class GeminiService:
@@ -30,7 +31,7 @@ class GeminiService:
     async def analyze_text(
         self, 
         text_content: str, 
-        analysis_type: str = "phase1"
+        custom_items: Optional[List[str]] = None
     ) -> str:
         """Gemini API를 사용하여 텍스트를 분석합니다."""
         if not self._initialized and not self._initialize():
@@ -40,7 +41,8 @@ class GeminiService:
             )
         
         try:
-            system_prompt = SYSTEM_PROMPTS.get(analysis_type, SYSTEM_PROMPTS["phase1"])
+            # custom_items 기반으로 시스템 프롬프트 생성 (custom_items 제공받지 못하면 기본 포맷 사용)
+            system_prompt = generate_system_prompt(custom_items)
             
             model = genai.GenerativeModel(
                 model_name='gemini-2.5-pro',

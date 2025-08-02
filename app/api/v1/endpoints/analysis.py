@@ -19,8 +19,8 @@ async def analyze_text(
     """FGD 전사 텍스트를 분석합니다. (인증 필요)"""
     try:
         result = await gemini_service.analyze_text(
-            request.text_content, 
-            request.analysis_type
+            request.text_content,
+            request.custom_items
         )
         
         return AnalysisResponse(

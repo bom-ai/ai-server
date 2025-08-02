@@ -3,26 +3,21 @@
 """
 from fastapi import APIRouter, HTTPException
 
-from app.models.schemas import PipelineResponse
+from app.models.schemas import PipelineResponse, PipelineRequest
 from app.services.analysis_service import analysis_service
 
 router = APIRouter()
 
 
 @router.post("/full-analysis", response_model=PipelineResponse)
-async def full_analysis_pipeline(
-    audio_url: str,
-    language: str = "ko",
-    enable_speaker_diarization: bool = True,
-    analysis_type: str = "phase1"
-):
+async def full_analysis_pipeline(request: PipelineRequest):
     """음성 변환부터 텍스트 분석까지 전체 파이프라인을 실행합니다."""
     try:
         result = await analysis_service.bomatic_pipeline(
-            audio_url=audio_url,
-            language=language,
-            enable_speaker_diarization=enable_speaker_diarization,
-            analysis_type=analysis_type
+            audio_url=request.audio_url,
+            language=request.language,
+            enable_speaker_diarization=request.enable_speaker_diarization,
+            custom_items=request.custom_items
         )
         
         return PipelineResponse(

@@ -2,7 +2,7 @@
 분석 서비스 - STT와 Gemini를 결합한 비즈니스 로직
 """
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 from app.services.stt_service import stt_service
 from app.services.gemini_service import gemini_service
@@ -20,7 +20,7 @@ class AnalysisService:
         audio_url: str,
         language: str = "ko",
         enable_speaker_diarization: bool = True,
-        analysis_type: str = "phase1"
+        custom_items: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """음성 변환부터 텍스트 분석까지 전체 파이프라인을 실행합니다."""
         
@@ -36,9 +36,9 @@ class AnalysisService:
         # 2단계: STT 완료까지 대기
         transcribed_text = await self.stt_service.wait_for_completion(rid)
         
-        # 3단계: Gemini 분석
+        # 3단계: Gemini 분석 (커스텀 Items 전달)
         analysis_result = await self.gemini_service.analyze_text(
-            transcribed_text, analysis_type
+            transcribed_text, custom_items
         )
         
         return {

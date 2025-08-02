@@ -2,7 +2,7 @@
 Pydantic 모델 정의
 """
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 class STTRequest(BaseModel):
@@ -15,7 +15,15 @@ class STTRequest(BaseModel):
 class AnalysisRequest(BaseModel):
     """텍스트 분석 요청 모델"""
     text_content: str                   # 분석할 텍스트
-    analysis_type: str = "phase1"       # 분석 단계 (phase1 or phase2)
+    custom_items: Optional[List[str]] = None  # 커스텀 분석 항목 리스트
+
+
+class PipelineRequest(BaseModel):
+    """전체 파이프라인 요청 모델"""
+    audio_url: str                      # 음성 파일 URL
+    language: str = "ko"                # 언어 설정
+    enable_speaker_diarization: bool = True  # 화자 분리 기능
+    custom_items: Optional[List[str]] = None  # 커스텀 분석 항목 리스트
 
 
 class STTResponse(BaseModel):
