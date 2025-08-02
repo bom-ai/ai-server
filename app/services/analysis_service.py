@@ -15,7 +15,7 @@ class AnalysisService:
         self.stt_service = stt_service
         self.gemini_service = gemini_service
     
-    async def full_pipeline(
+    async def bomatic_pipeline(
         self,
         audio_url: str,
         language: str = "ko",
@@ -23,6 +23,7 @@ class AnalysisService:
         analysis_type: str = "phase1"
     ) -> Dict[str, Any]:
         """음성 변환부터 텍스트 분석까지 전체 파이프라인을 실행합니다."""
+        
         # 1단계: STT 요청
         stt_result = await self.stt_service.request_stt(
             audio_url, language, enable_speaker_diarization

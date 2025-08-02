@@ -15,7 +15,7 @@ class GeminiService:
         self.api_key = settings.gemini_api_key
         self._initialized = False
     
-    def _initialize(self) -> bool:
+    def _initialize(self) -> bool:  # 클래스 내부 전용 Private 메서드 (호출은 가능하지만 _ 붙인 건 관례상 내부에서만!)
         """Gemini API를 초기화합니다."""
         if not self.api_key:
             return False

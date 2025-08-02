@@ -18,7 +18,7 @@ async def full_analysis_pipeline(
 ):
     """음성 변환부터 텍스트 분석까지 전체 파이프라인을 실행합니다."""
     try:
-        result = await analysis_service.full_pipeline(
+        result = await analysis_service.bomatic_pipeline(
             audio_url=audio_url,
             language=language,
             enable_speaker_diarization=enable_speaker_diarization,

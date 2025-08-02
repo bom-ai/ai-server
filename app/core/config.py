@@ -57,6 +57,19 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         extra = "ignore"  # 추가 필드 무시
 
+"""
+핵심 기능들:
+1. 싱글톤 패턴 구현
+    - @lru_cache()를 통해 Settings 객체를 한 번만 생성하고 캐시
+    - 메모리 효율성과 일관성 보장
+2. 전역 접근
+    - 앱 전체에서 from app.core.config import settings로 동일한 설정 객체 사용
+    - 설정 변경 시 모든 모듈에 즉시 반영
+3. 환경변수 자동 로드
+    - 앱 시작 시 .env 파일과 시스템 환경변수를 자동으로 읽어와 설정 초기화
+4. 타입 안정성
+    - Pydantic의 검증 기능으로 잘못된 설정값 사전 차단
+"""
 
 @lru_cache()
 def get_settings() -> Settings:
