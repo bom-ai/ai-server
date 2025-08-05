@@ -2,18 +2,24 @@
 DOCX 파일 처리 유틸리티
 """
 import io
+import re
 from docx import Document
 
 
-def extract_text_from_docx(file_content: bytes) -> str:
+def extract_text_with_separated_tables(file_content: bytes) -> dict:
     """
-    DOCX 파일 내용에서 텍스트를 추출합니다.
+    DOCX 파일에서 텍스트를 추출하되, 테이블 헤더와 데이터를 분리합니다.
     
     Args:
         file_content: DOCX 파일의 바이트 내용
         
     Returns:
-        추출된 텍스트 문자열
+        {
+            'paragraphs': 문단들의 리스트,
+            'table_headers': 각 테이블 첫 번째 행들의 리스트,
+            'table_data_rows': 각 테이블 나머지 행들의 리스트,
+            'full_text': 전체 텍스트
+        }
     """
     try:
         # 바이트 데이터를 메모리 스트림으로 변환
@@ -22,25 +28,46 @@ def extract_text_from_docx(file_content: bytes) -> str:
         # Document 객체 생성
         doc = Document(file_stream)
         
-        # 모든 paragraph에서 텍스트 추출
+        # 문단 추출
         paragraphs = []
         for paragraph in doc.paragraphs:
             if paragraph.text.strip():  # 빈 줄 제외
                 paragraphs.append(paragraph.text.strip())
         
-        # 테이블에서 텍스트 추출
-        tables = []
-        for table in doc.tables:
+        # 테이블에서 헤더와 데이터 분리 추출
+        table_headers = []  # 각 테이블의 첫 번째 행(헤더)
+        table_data_rows = []  # 각 테이블의 나머지 행들
+        all_tables = []  # 전체 테이블 (기존 형태)
+        
+        for table_idx, table in enumerate(doc.tables):
             table_text = []
-            for row in table.rows:
+            
+            for row_idx, row in enumerate(table.rows):
                 row_text = []
                 for cell in row.cells:
                     if cell.text.strip():
                         row_text.append(cell.text.strip())
+                
                 if row_text:
-                    table_text.append(" | ".join(row_text))
+                    row_content = " | ".join(row_text)
+                    table_text.append(row_content)
+                    
+                    # 첫 번째 행은 헤더로 분류
+                    if row_idx == 0:
+                        table_headers.append({
+                            'table_index': table_idx,
+                            'content': row_content
+                        })
+                    else:
+                        # 나머지 행들은 데이터 행으로 분류
+                        table_data_rows.append({
+                            'table_index': table_idx,
+                            'row_index': row_idx,
+                            'content': row_content
+                        })
+            
             if table_text:
-                tables.append("\n".join(table_text))
+                all_tables.append("\n".join(table_text))
         
         # 전체 텍스트 결합
         all_text = []
@@ -49,54 +76,67 @@ def extract_text_from_docx(file_content: bytes) -> str:
             all_text.append("=== 문서 내용 ===")
             all_text.extend(paragraphs)
         
-        if tables:
+        if all_tables:
             all_text.append("\n=== 표 내용 ===")
-            all_text.extend(tables)
+            all_text.extend(all_tables)
         
-        return "\n".join(all_text)
+        return {
+            'paragraphs': paragraphs,
+            'table_headers': table_headers,
+            'table_data_rows': table_data_rows,
+            'full_text': "\n".join(all_text)
+        }
         
     except Exception as e:
-        raise Exception(f"DOCX 파일 처리 중 오류 발생: {str(e)}")
+        raise Exception(f"DOCX 분리 처리 중 오류 발생: {str(e)}")
 
 
-def extract_headings_and_content(file_content: bytes) -> dict:
+def filter_duplicate_rows(table_data_rows: list) -> dict:
     """
-    DOCX 파일에서 제목별로 내용을 구조화하여 추출합니다.
+    테이블 데이터 행에서 중복 제거 및 통계 정보를 제공합니다.
     
     Args:
-        file_content: DOCX 파일의 바이트 내용
+        table_data_rows: extract_text_with_separated_tables에서 반환된 table_data_rows
         
     Returns:
-        제목을 키로 하는 딕셔너리
+        {
+            'unique_rows': 중복 제거된 행들,
+            'duplicate_stats': 각 행의 반복 횟수 통계
+        }
     """
     try:
-        file_stream = io.BytesIO(file_content)
-        doc = Document(file_stream)
+        content_count = {}
+        unique_rows = []
         
-        structured_content = {}
-        current_heading = "기본 내용"
-        current_content = []
-        
-        for paragraph in doc.paragraphs:
-            # 제목 스타일 확인 (Heading 1, 2, 3 등)
-            if paragraph.style.name.startswith('Heading'):
-                # 이전 섹션 저장
-                if current_content:
-                    structured_content[current_heading] = "\n".join(current_content)
+        for row_data in table_data_rows:
+            content = row_data['content'].strip()  # 앞뒤 화이트스페이스 제거
+            content = re.sub(r'\s+', ' ', content)  # 연속된 공백을 하나로 통합
+            
+            if content not in content_count:
+                # 정리된 content로 새로운 row_data 생성
+                cleaned_row_data = row_data.copy()
+                cleaned_row_data['content'] = content
                 
-                # 새 섹션 시작
-                current_heading = paragraph.text.strip()
-                current_content = []
+                content_count[content] = {
+                    'count': 1,
+                    'first_occurrence': cleaned_row_data
+                }
+                unique_rows.append(cleaned_row_data)
             else:
-                # 일반 내용 추가
-                if paragraph.text.strip():
-                    current_content.append(paragraph.text.strip())
+                content_count[content]['count'] += 1
         
-        # 마지막 섹션 저장
-        if current_content:
-            structured_content[current_heading] = "\n".join(current_content)
+        # 통계 정보 생성
+        duplicate_stats = {}
+        for content, info in content_count.items():
+            if info['count'] > 1:
+                duplicate_stats[content] = info['count']
         
-        return structured_content
+        return {
+            'unique_rows': unique_rows,
+            'duplicate_stats': duplicate_stats,
+            'total_unique': len(unique_rows),
+            'total_duplicates': len(duplicate_stats)
+        }
         
     except Exception as e:
-        raise Exception(f"DOCX 구조화 처리 중 오류 발생: {str(e)}")
+        raise Exception(f"중복 필터링 중 오류 발생: {str(e)}")
