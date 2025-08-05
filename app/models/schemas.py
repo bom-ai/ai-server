@@ -102,3 +102,14 @@ class UserInfo(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class BatchAnalysisResponse(BaseModel):
+    """배치 분석 응답 모델"""
+    status: str
+    message: str
+    job_id: str
+    total_files: int
+    processed_files: int = 0
+    results: Optional[dict] = None  # {filename: analysis_result}
+    errors: Optional[dict] = None   # {filename: error_message}
