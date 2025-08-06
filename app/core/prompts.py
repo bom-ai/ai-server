@@ -2,7 +2,7 @@
 시스템 프롬프트 관리
 for Google Gemini API
 """
-from typing import List
+from typing import List, Dict, Optional
 
 # 기본 프롬프트 템플릿 (Items 부분을 동적으로 삽입 가능)
 FGD_ANALYSIS_TEMPLATE = """
@@ -120,3 +120,34 @@ def generate_system_prompt(custom_items: List[str] = None) -> str:
     formatted_items = format_items_list(items_to_use)
     
     return FGD_ANALYSIS_TEMPLATE.format(items_list=formatted_items)
+
+
+def generate_system_prompt_from_docx(file_content: bytes) -> str:
+    """
+    DOCX 파일에서 추출한 테이블 구조를 기반으로 시스템 프롬프트를 생성합니다.
+    
+    Args:
+        file_content: DOCX 파일의 바이트 내용
+    
+    Returns:
+        완성된 시스템 프롬프트 문자열
+    """
+    try:
+        from ..utils.docx_processor import (
+            extract_table_headers_with_subitems,
+            format_items_for_prompt
+        )
+        
+        # DOCX에서 구조화된 테이블 정보 추출
+        structured_items = extract_table_headers_with_subitems(file_content)
+        
+        # 프롬프트용 문자열 리스트로 변환
+        custom_items = format_items_for_prompt(structured_items)
+        
+        # 시스템 프롬프트 생성
+        return generate_system_prompt(custom_items)
+        
+    except Exception as e:
+        # 오류 발생 시 기본 프롬프트 반환
+        print(f"DOCX 기반 프롬프트 생성 중 오류 발생: {str(e)}")
+        return generate_system_prompt()
