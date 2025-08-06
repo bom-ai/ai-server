@@ -1,6 +1,7 @@
 """
 Pydantic 모델 정의
 """
+import json
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime
@@ -18,12 +19,47 @@ class AnalysisRequest(BaseModel):
     custom_items: Optional[List[str]] = None  # 커스텀 분석 항목 리스트
 
 
-class PipelineRequest(BaseModel):
-    """전체 파이프라인 요청 모델"""
-    audio_url: str                      # 음성 파일 URL
-    language: str = "ko"                # 언어 설정
-    enable_speaker_diarization: bool = True  # 화자 분리 기능
-    custom_items: Optional[List[str]] = None  # 커스텀 분석 항목 리스트
+class BatchAnalysisRequest(BaseModel):
+    """배치 분석 요청 모델 (참조용)"""
+    mapping: dict  # 오디오 파일명과 그룹명 매핑 {"파일명.mp3": "그룹명"}
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "mapping": {
+                    "interview1.mp3": "Group A", 
+                    "interview2.wav": "Group B",
+                    "meeting.m4a": "Group C"
+                }
+            }
+        }
+
+
+class FileMappingValidation(BaseModel):
+    """파일 매핑 검증용 모델"""
+    mapping: dict
+    
+    @classmethod
+    def validate_mapping(cls, mapping_str: str) -> dict:
+        """JSON 문자열 매핑을 검증하고 dict로 변환"""
+        try:
+            mapping_dict = json.loads(mapping_str)
+            if not isinstance(mapping_dict, dict):
+                raise ValueError("매핑은 객체 형태여야 합니다.")
+            
+            for filename, group in mapping_dict.items():
+                if not isinstance(filename, str) or not isinstance(group, str):
+                    raise ValueError("파일명과 그룹명은 모두 문자열이어야 합니다.")
+                
+                # 지원되는 오디오 파일 확장자 검증
+                supported_extensions = ['.mp3', '.wav', '.m4a', '.flac', '.ogg']
+                if not any(filename.lower().endswith(ext) for ext in supported_extensions):
+                    raise ValueError(f"지원하지 않는 파일 형식입니다: {filename}")
+            
+            return mapping_dict
+            
+        except json.JSONDecodeError:
+            raise ValueError("매핑 정보가 올바른 JSON 형식이 아닙니다.")
 
 
 class STTResponse(BaseModel):
@@ -39,15 +75,6 @@ class AnalysisResponse(BaseModel):
     status: str
     message: str
     result: Optional[str] = None
-
-
-class PipelineResponse(BaseModel):
-    """전체 파이프라인 응답 모델"""
-    status: str
-    message: str
-    stt_rid: Optional[str] = None
-    transcribed_text: Optional[str] = None
-    analysis_result: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -113,3 +140,9 @@ class BatchAnalysisResponse(BaseModel):
     processed_files: int = 0
     results: Optional[dict] = None  # {filename: analysis_result}
     errors: Optional[dict] = None   # {filename: error_message}
+
+
+class PipelineResponse(BaseModel):
+    """전체 bo:matic 파이프라인 작업 완료! -> 응답 모델"""
+    message: str
+    download_url: str

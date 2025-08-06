@@ -4,6 +4,7 @@ DOCX 파일 처리 유틸리티
 import io
 import re
 from docx import Document
+from typing import List, Dict, Optional
 
 
 def extract_text_with_separated_tables(file_content: bytes) -> dict:
@@ -91,52 +92,199 @@ def extract_text_with_separated_tables(file_content: bytes) -> dict:
         raise Exception(f"DOCX 분리 처리 중 오류 발생: {str(e)}")
 
 
-def filter_duplicate_rows(table_data_rows: list) -> dict:
+def extract_research_user_groups(table_data_rows: list) -> dict:
     """
-    테이블 데이터 행에서 중복 제거 및 통계 정보를 제공합니다.
+    테이블 데이터에서 리서치 사용자 그룹을 추출하고 중복을 제거합니다.
+    
+    FGD 분석 템플릿에서 각 테이블은 동일한 사용자 그룹들에 대한 정보를 담고 있습니다.
+    이 함수는 중복된 그룹 정보를 제거하여 고유한 리서치 대상 그룹들을 식별합니다.
     
     Args:
         table_data_rows: extract_text_with_separated_tables에서 반환된 table_data_rows
         
     Returns:
         {
-            'unique_rows': 중복 제거된 행들,
-            'duplicate_stats': 각 행의 반복 횟수 통계
+            'unique_groups': 고유한 사용자 그룹들,
+            'group_occurrence_stats': 각 그룹의 등장 횟수 통계,
+            'total_unique_groups': 총 고유 그룹 수,
+            'total_repeated_groups': 반복 등장한 그룹 수
         }
     """
     try:
-        content_count = {}
-        unique_rows = []
+        group_count = {}
+        unique_groups = []
         
         for row_data in table_data_rows:
-            content = row_data['content'].strip()  # 앞뒤 화이트스페이스 제거
-            content = re.sub(r'\s+', ' ', content)  # 연속된 공백을 하나로 통합
+            group_info = row_data['content'].strip()  # 앞뒤 화이트스페이스 제거
+            group_info = re.sub(r'\s+', ' ', group_info)  # 연속된 공백을 하나로 통합
             
-            if content not in content_count:
-                # 정리된 content로 새로운 row_data 생성
-                cleaned_row_data = row_data.copy()
-                cleaned_row_data['content'] = content
+            if group_info not in group_count:
+                # 정리된 group_info로 새로운 row_data 생성
+                cleaned_group_data = row_data.copy()
+                cleaned_group_data['content'] = group_info
                 
-                content_count[content] = {
+                group_count[group_info] = {
                     'count': 1,
-                    'first_occurrence': cleaned_row_data
+                    'first_occurrence': cleaned_group_data
                 }
-                unique_rows.append(cleaned_row_data)
+                unique_groups.append(cleaned_group_data)
             else:
-                content_count[content]['count'] += 1
+                group_count[group_info]['count'] += 1
         
-        # 통계 정보 생성
-        duplicate_stats = {}
-        for content, info in content_count.items():
+        # 그룹 등장 횟수 통계 생성
+        group_occurrence_stats = {}
+        for group_info, info in group_count.items():
             if info['count'] > 1:
-                duplicate_stats[content] = info['count']
+                group_occurrence_stats[group_info] = info['count']
         
         return {
-            'unique_rows': unique_rows,
-            'duplicate_stats': duplicate_stats,
-            'total_unique': len(unique_rows),
-            'total_duplicates': len(duplicate_stats)
+            'unique_groups': unique_groups,
+            'group_occurrence_stats': group_occurrence_stats,
+            'total_unique_groups': len(unique_groups),
+            'total_repeated_groups': len(group_occurrence_stats)
         }
         
     except Exception as e:
-        raise Exception(f"중복 필터링 중 오류 발생: {str(e)}")
+        raise Exception(f"리서치 사용자 그룹 추출 중 오류 발생: {str(e)}")
+
+
+def extract_table_headers_with_subitems(file_content: bytes) -> List[Dict]:
+    """
+    DOCX 파일에서 테이블 헤더와 해당 테이블의 세부 항목들을 추출합니다.
+    
+    Args:
+        file_content: DOCX 파일의 바이트 내용
+        
+    Returns:
+        [
+            {
+                'header': '테이블 헤더 텍스트',
+                'subitems': ['세부 항목 1', '세부 항목 2', ...],
+                'table_index': 테이블 인덱스
+            },
+            ...
+        ]
+    """
+    try:
+        # 바이트 데이터를 메모리 스트림으로 변환
+        file_stream = io.BytesIO(file_content)
+        
+        # Document 객체 생성
+        doc = Document(file_stream)
+        
+        structured_items = []
+        
+        for table_idx, table in enumerate(doc.tables):
+            if len(table.rows) == 0:
+                continue
+                
+            # 첫 번째 행에서 헤더 추출
+            header_row = table.rows[0]
+            header_text = ""
+            
+            # 헤더 행의 모든 셀에서 텍스트 추출
+            for cell in header_row.cells:
+                cell_text = cell.text.strip()
+                if cell_text and not header_text:  # 첫 번째 비어있지 않은 셀을 헤더로 사용
+                    header_text = cell_text
+                    break
+            
+            if not header_text:
+                continue
+                
+            # 세부 항목 추출
+            subitems = []
+            
+            # 테이블의 모든 행을 확인하여 세부 항목 찾기
+            for row in table.rows[1:]:  # 헤더 제외
+                for cell in row.cells:
+                    cell_text = cell.text.strip()
+                    if cell_text:
+                        # 줄바꿈으로 분리된 항목들 확인
+                        lines = cell_text.split('\n')
+                        for line in lines:
+                            line = line.strip()
+                            
+                            # 빈 줄이나 너무 짧은 텍스트는 제외
+                            if not line or len(line) < 2:
+                                continue
+                            
+                            # 일반적인 테이블 데이터 패턴 제외 (예: "30-37", "사용자", "경쟁" 등)
+                            # 숫자-숫자 패턴 제외
+                            if re.match(r'^\d+-\d+$', line):
+                                continue
+                            
+                            # 단순한 단어 하나만 있는 경우 제외 (예: "사용자", "경쟁")
+                            if len(line.split()) == 1 and len(line) < 10:
+                                continue
+                            
+                            # "- " 로 시작하는 항목들 (리스트 형태)
+                            if line.startswith('- '):
+                                item_text = line[2:].strip()
+                                if item_text and item_text not in subitems and len(item_text) < 200:
+                                    subitems.append(item_text)
+                            
+                            # "•" 로 시작하는 항목들 (불릿 포인트)
+                            elif line.startswith('• '):
+                                item_text = line[2:].strip()
+                                if item_text and item_text not in subitems and len(item_text) < 200:
+                                    subitems.append(item_text)
+                            
+                            # 숫자로 시작하는 항목들 (예: "1. 항목명", "1) 항목명")
+                            elif re.match(r'^\d+[\.\)]\s+', line):
+                                item_text = re.sub(r'^\d+[\.\)]\s+', '', line).strip()
+                                if item_text and item_text not in subitems and len(item_text) < 200:
+                                    subitems.append(item_text)
+                            
+                            # 그 외의 의미있는 텍스트 (줄바꿈으로 구분된 일반 항목들)
+                            # 단, 너무 긴 텍스트나 일반적인 테이블 데이터가 아닌 경우
+                            elif (len(line) > 10 and len(line) < 200 and 
+                                  not re.match(r'^\d+$', line) and  # 숫자만 있는 것 제외
+                                  '|' not in line):  # 테이블 구분자가 있는 것 제외
+                                if line not in subitems:
+                                    subitems.append(line)
+            
+            structured_items.append({
+                'header': header_text,
+                'subitems': subitems,
+                'table_index': table_idx
+            })
+        
+        return structured_items
+        
+    except Exception as e:
+        raise Exception(f"테이블 헤더 및 세부 항목 추출 중 오류 발생: {str(e)}")
+
+
+def format_items_for_prompt(structured_items: List[Dict]) -> List[str]:
+    """
+    구조화된 테이블 아이템들을 프롬프트용 문자열 리스트로 변환합니다.
+    
+    Args:
+        structured_items: extract_table_headers_with_subitems에서 반환된 구조화된 아이템들
+        
+    Returns:
+        프롬프트에 사용할 수 있는 문자열 리스트
+        예: ["헤더 (세부항목1, 세부항목2)", "헤더2", ...]
+    """
+    try:
+        formatted_items = []
+        
+        for item in structured_items:
+            header = item['header']
+            subitems = item['subitems']
+            
+            if subitems:
+                # 세부 항목이 있는 경우 헤더 뒤에 괄호로 추가
+                subitems_str = ', '.join(subitems)
+                formatted_item = f"{header} ({subitems_str})"
+            else:
+                # 세부 항목이 없는 경우 헤더만 사용
+                formatted_item = header
+            
+            formatted_items.append(formatted_item)
+        
+        return formatted_items
+        
+    except Exception as e:
+        raise Exception(f"프롬프트용 아이템 포맷팅 중 오류 발생: {str(e)}")
