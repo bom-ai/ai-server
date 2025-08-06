@@ -10,7 +10,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.utils.docx_processor import (
     extract_text_with_separated_tables,
-    filter_duplicate_rows
+    extract_research_user_groups,
+    extract_table_headers_with_subitems,
+    format_items_for_prompt
 )
 
 def debug_docx_structure(file_path):
@@ -90,25 +92,48 @@ def test_real_docx_file(file_path):
         if len(separated_data['table_data_rows']) > 5:
             print(f"  ... 나머지 {len(separated_data['table_data_rows']) - 5}개 행")
         
-        # 리서치 대상 그룹 리스트화를 위한 중복 제거 메서드
-        print(f"\n=== 중복 제거 결과 ===")
-        filtered_data = filter_duplicate_rows(separated_data['table_data_rows'])
-        print(f"filtered_data 키들: {list(filtered_data.keys())}")
+        # 리서치 사용자 그룹 추출 메서드
+        print(f"\n=== 리서치 사용자 그룹 추출 결과 ===")
+        research_groups_data = extract_research_user_groups(separated_data['table_data_rows'])
+        print(f"research_groups_data 키들: {list(research_groups_data.keys())}")
         print("-" * 50)
         
-        print(f"총 고유 행 수: {filtered_data['total_unique']}")
-        print(f"중복된 내용 수: {filtered_data['total_duplicates']}")
+        print(f"총 고유 그룹 수: {research_groups_data['total_unique_groups']}")
+        print(f"반복 등장한 그룹 수: {research_groups_data['total_repeated_groups']}")
         
-        print(f"\nunique_rows (개수: {len(filtered_data['unique_rows'])}):")
-        for i, row in enumerate(filtered_data['unique_rows']):
-            print(f"  {i+1}. 테이블{row['table_index']}-행{row['row_index']}: {row['content'][:80]}{'...' if len(row['content']) > 80 else ''}")
+        print(f"\nunique_groups (개수: {len(research_groups_data['unique_groups'])}):")
+        for i, group in enumerate(research_groups_data['unique_groups']):
+            print(f"  {i+1}. 테이블{group['table_index']}-행{group['row_index']}: {group['content'][:80]}{'...' if len(group['content']) > 80 else ''}")
         
-        if filtered_data['duplicate_stats']:
-            print(f"\nduplicate_stats (중복 통계):")
-            for content, count in list(filtered_data['duplicate_stats'].items()):
-                print(f"  '{content[:50]}{'...' if len(content) > 50 else ''}' → {count}회 반복")
+        if research_groups_data['group_occurrence_stats']:
+            print(f"\ngroup_occurrence_stats (그룹 등장 통계):")
+            for group_info, count in list(research_groups_data['group_occurrence_stats'].items()):
+                print(f"  '{group_info[:50]}{'...' if len(group_info) > 50 else ''}' → {count}회 등장")
         else:
-            print(f"\nduplicate_stats: 중복된 행이 없습니다.")
+            print(f"\ngroup_occurrence_stats: 중복 등장한 그룹이 없습니다.")
+        
+        # 새로운 기능: 테이블 헤더와 세부 항목 추출
+        print(f"\n=== 테이블 헤더 및 세부 항목 추출 결과 ===")
+        structured_items = extract_table_headers_with_subitems(file_content)
+        print(f"구조화된 항목 수: {len(structured_items)}")
+        print("-" * 50)
+        
+        for i, item in enumerate(structured_items):
+            print(f"{i+1}. 헤더: {item['header']}")
+            if item['subitems']:
+                print(f"   세부항목: {item['subitems']}")
+            else:
+                print(f"   세부항목: 없음")
+            print()
+        
+        # 프롬프트용 포맷팅 테스트
+        print(f"=== 프롬프트용 포맷팅 결과 ===")
+        formatted_items = format_items_for_prompt(structured_items)
+        print(f"포맷팅된 항목 수: {len(formatted_items)}")
+        print("-" * 50)
+        
+        for i, item in enumerate(formatted_items):
+            print(f"{i+1}. {item}")
         
         print("-" * 50)
         
