@@ -27,11 +27,11 @@ class GeminiService:
             return True
         except Exception:
             return False
-    
+
     async def analyze_text(
-        self, 
-        text_content: str, 
-        custom_items: Optional[List[str]] = None
+        self,
+        text_content: str,
+        system_prompt: str
     ) -> str:
         """Gemini API를 사용하여 텍스트를 분석합니다."""
         if not self._initialized and not self._initialize():
@@ -41,9 +41,6 @@ class GeminiService:
             )
         
         try:
-            # custom_items 기반으로 시스템 프롬프트 생성 (custom_items 제공받지 못하면 기본 포맷 사용)
-            system_prompt = generate_system_prompt(custom_items)
-            
             model = genai.GenerativeModel(
                 model_name='gemini-2.5-pro',
                 system_instruction=system_prompt
@@ -54,7 +51,7 @@ class GeminiService:
         except Exception as e:
             raise HTTPException(
                 status_code=500, 
-                detail=f"Gemini 분석 실패: {str(e)}"
+                detail=f"Gemini 커스텀 프롬프트 분석 실패: {str(e)}"
             )
 
 
