@@ -31,7 +31,7 @@ async def bomatic_analyze(
                 detail="프레임 파일은 .docx 형식이어야 합니다."
             )
         
-        # 매핑 JSON 파싱 및 검증
+        # 매핑 JSON 파싱 및 검증 (이미 정규화됨)
         try:
             mapping_dict = FileMappingValidation.validate_mapping(mapping)
         except ValueError as e:
@@ -40,10 +40,18 @@ async def bomatic_analyze(
                 detail=str(e)
             )
         
-        # 업로드된 파일과 매핑 일치 검증
-        uploaded_filenames = {audio.filename for audio in audios}
+        # 업로드된 파일명도 동일하게 정규화
+        uploaded_filenames = {
+            FileMappingValidation.normalize_filename(audio.filename) 
+            for audio in audios
+        }
         mapping_filenames = set(mapping_dict.keys())
-        
+
+        # 디버깅 출력 추가
+        print("=== 파일명 디버깅 ===")
+        print(f"업로드된 파일명들 (정규화됨): {uploaded_filenames}")
+        print(f"매핑 파일명들 (정규화됨): {mapping_filenames}")
+
         if uploaded_filenames != mapping_filenames:
             missing_in_mapping = uploaded_filenames - mapping_filenames
             missing_in_upload = mapping_filenames - uploaded_filenames

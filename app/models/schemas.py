@@ -5,6 +5,7 @@ import json
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime
+import unicodedata
 
 class STTRequest(BaseModel):
     """STT 요청 모델"""
@@ -39,6 +40,18 @@ class FileMappingValidation(BaseModel):
     """파일 매핑 검증용 모델"""
     mapping: dict
     
+    @staticmethod
+    def normalize_filename(filename: str) -> str:
+        """파일명을 정규화합니다."""
+        if not filename:
+            return filename
+        
+        # 유니코드 정규화 (NFC)
+        normalized = unicodedata.normalize('NFC', filename)
+        # 앞뒤 공백 제거
+        normalized = normalized.strip()
+        return normalized
+    
     @classmethod
     def validate_mapping(cls, mapping_str: str) -> dict:
         """JSON 문자열 매핑을 검증하고 dict로 변환"""
@@ -47,16 +60,24 @@ class FileMappingValidation(BaseModel):
             if not isinstance(mapping_dict, dict):
                 raise ValueError("매핑은 객체 형태여야 합니다.")
             
+            # 정규화된 매핑 딕셔너리 생성
+            normalized_mapping = {}
+            
             for filename, group in mapping_dict.items():
                 if not isinstance(filename, str) or not isinstance(group, str):
                     raise ValueError("파일명과 그룹명은 모두 문자열이어야 합니다.")
                 
+                # 파일명 정규화
+                normalized_filename = cls.normalize_filename(filename)
+                
                 # 지원되는 오디오 파일 확장자 검증
                 supported_extensions = ['.mp3', '.wav', '.m4a', '.flac', '.ogg']
-                if not any(filename.lower().endswith(ext) for ext in supported_extensions):
-                    raise ValueError(f"지원하지 않는 파일 형식입니다: {filename}")
+                if not any(normalized_filename.lower().endswith(ext) for ext in supported_extensions):
+                    raise ValueError(f"지원하지 않는 파일 형식입니다: {normalized_filename}")
+                
+                normalized_mapping[normalized_filename] = group
             
-            return mapping_dict
+            return normalized_mapping
             
         except json.JSONDecodeError:
             raise ValueError("매핑 정보가 올바른 JSON 형식이 아닙니다.")

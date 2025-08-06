@@ -81,6 +81,18 @@ class PipelineService:
         # 작업 ID 생성
         job_id = str(uuid.uuid4())
         
+        try:
+            # 1. DOCX 파일 처리 테스트
+            docx_table_info = extract_text_with_separated_tables(frame_content)
+            structured_items = extract_table_headers_with_subitems(frame_content)
+            custom_items = format_items_for_prompt(structured_items)
+            
+            print(f"DOCX 처리 완료: {len(custom_items)}개 항목 추출")
+            
+        except Exception as e:
+            print(f"DOCX 처리 실패: {str(e)}")
+            raise Exception(f"프레임 파일 처리 실패: {str(e)}")
+        
         # 배치 작업 정보 초기화
         self.batch_jobs[job_id] = {
             "status": "processing",
