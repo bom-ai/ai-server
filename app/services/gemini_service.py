@@ -54,6 +54,35 @@ class GeminiService:
                 detail=f"Gemini 커스텀 프롬프트 분석 실패: {str(e)}"
             )
 
+    async def analyze_text_with_items(
+        self,
+        text_content: str,
+        custom_items: Optional[List[str]] = None
+    ) -> str:
+        """custom_items를 사용하여 텍스트를 분석합니다."""
+        if not self._initialized and not self._initialize():
+            raise HTTPException(
+                status_code=500, 
+                detail="Gemini API 키가 설정되지 않았습니다."
+            )
+        
+        try:
+            # custom_items를 기반으로 시스템 프롬프트 생성
+            system_prompt = generate_system_prompt(custom_items or [])
+            
+            model = genai.GenerativeModel(
+                model_name='gemini-2.5-pro',
+                system_instruction=system_prompt
+            )
+            
+            response = model.generate_content(text_content)
+            return response.text
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Gemini 분석 실패: {str(e)}"
+            )
+
 
 # 전역 Gemini 서비스 인스턴스
 gemini_service = GeminiService()
