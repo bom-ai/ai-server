@@ -73,7 +73,7 @@ class PipelineService:
     async def start_batch_analysis(
         self,
         frame_content: bytes,
-        audio_files: List[UploadFile],
+        audio_contents: List[dict],
         mapping: dict
     ) -> str:
         """배치 분석 작업을 시작하고 job_id를 반환합니다."""
@@ -97,14 +97,14 @@ class PipelineService:
         self.batch_jobs[job_id] = {
             "status": "processing",
             "message": "배치 분석 작업 진행 중...",
-            "total_files": len(audio_files),
+            "total_files": len(audio_contents),
             "processed_files": 0,
             "results": {},
             "errors": {}
         }
         
         # 백그라운드에서 배치 처리 작업 시작
-        asyncio.create_task(self._batch_analysis_task(job_id, frame_content, audio_files, mapping))
+        asyncio.create_task(self._batch_analysis_task(job_id, frame_content, audio_contents, mapping))
         
         return job_id
     
@@ -133,7 +133,7 @@ class PipelineService:
         self, 
         job_id: str, 
         frame_content: bytes, 
-        audio_files: List[UploadFile], 
+        audio_contents: List[dict],
         mapping: dict
     ):
         """배치 분석 작업을 백그라운드에서 처리합니다."""
@@ -143,13 +143,18 @@ class PipelineService:
             structured_items = extract_table_headers_with_subitems(frame_content)
             custom_items = format_items_for_prompt(structured_items)
             
-            for i, audio_file in enumerate(audio_files):
-                filename = audio_file.filename
+            for i, audio_data in enumerate(audio_contents):
+                filename = audio_data['filename']  # dict에서 접근
+                audio_content = audio_data['content']
+                content_type = audio_data['content_type']
                 group_name = mapping.get(filename, "Unknown Group")
                 
                 try:
-                    # 2. STT 처리
-                    stt_result = await self.stt_service.request_stt_with_file_upload(audio_file)
+                    # 2. STT 처리 - 파일 내용으로 처리
+                    # STT 서비스에 파일 내용 전달하는 방법 필요
+                    stt_result = await self.stt_service.request_stt_with_file_content(
+                        audio_content, filename
+                    )
                     rid = stt_result.get("rid")
                     
                     if rid:
@@ -172,7 +177,7 @@ class PipelineService:
                         
                 except Exception as e:
                     self.batch_jobs[job_id]["errors"][filename] = str(e)
-                
+            
                 # 진행 상황 업데이트
                 self.batch_jobs[job_id]["processed_files"] = i + 1
             

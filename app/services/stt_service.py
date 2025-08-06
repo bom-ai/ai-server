@@ -1,6 +1,7 @@
 """
 STT(Speech-to-Text) 서비스
 """
+import httpx
 import requests
 import asyncio
 from typing import Dict, Any, BinaryIO
@@ -125,6 +126,70 @@ class STTService:
             raise HTTPException(
                 status_code=500, 
                 detail=f"다글로 STT 요청 실패: {str(e)}"
+            )
+
+
+    async def request_stt_with_file_content(
+        self, 
+        file_content: bytes, 
+        filename: str,
+        language: str = "ko",
+        enable_speaker_diarization: bool = True
+    ) -> Dict[str, Any]:
+        """파일 내용(바이트)을 사용하여 STT 요청"""
+        
+        if not self.api_key:
+            raise HTTPException(
+                status_code=500, 
+                detail="DAGLO API 키가 설정되지 않았습니다."
+            )
+        
+        # Content-Type을 파일 확장자에 따라 설정
+        if filename.lower().endswith('.mp3'):
+            content_type = 'audio/mpeg'
+        elif filename.lower().endswith('.wav'):
+            content_type = 'audio/wav'
+        elif filename.lower().endswith('.m4a'):
+            content_type = 'audio/mp4'
+        else:
+            content_type = 'audio/mpeg'  # 기본값
+        
+        files = {
+            'file': (filename, file_content, content_type)
+        }
+        
+        data = {
+            'language': language,
+            'enable_speaker_diarization': str(enable_speaker_diarization).lower()
+        }
+        
+        # headers를 직접 정의 (self.headers 대신)
+        headers = {
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    self.base_url,  # 올바른 URL 사용
+                    headers=headers,
+                    files=files,
+                    data=data
+                )
+                
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    error_detail = response.text
+                    raise HTTPException(
+                        status_code=response.status_code,
+                        detail=f"STT API 오류: {error_detail}"
+                    )
+                    
+        except httpx.RequestError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"STT API 연결 오류: {str(e)}"
             )
 
 

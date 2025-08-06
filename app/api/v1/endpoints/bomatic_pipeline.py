@@ -70,10 +70,20 @@ async def bomatic_analyze(
         # 프레임 파일 내용 읽기
         frame_content = await frame.read()
         
+        # 오디오 파일들의 내용도 미리 읽기
+        audio_contents = []
+        for audio in audios:
+            audio_content = await audio.read()
+            audio_contents.append({
+                'filename': FileMappingValidation.normalize_filename(audio.filename),
+                'content': audio_content,
+                'content_type': audio.content_type
+            })
+        
         # pipeline_service를 통해 배치 분석 작업 시작
         job_id = await pipeline_service.start_batch_analysis(
             frame_content, 
-            audios, 
+            audio_contents,  # UploadFile 대신 내용을 전달
             mapping_dict
         )
         
