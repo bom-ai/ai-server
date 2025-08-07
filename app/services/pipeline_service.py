@@ -137,11 +137,16 @@ class PipelineService:
         mapping: dict
     ):
         """배치 분석 작업을 백그라운드에서 처리합니다."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             # 1. 프레임 파일(.docx) 처리 - custom_items 추출
             docx_table_info = extract_text_with_separated_tables(frame_content)
             structured_items = extract_table_headers_with_subitems(frame_content)
             custom_items = format_items_for_prompt(structured_items)
+            
+            logger.info(f"Job {job_id}: Processing {len(audio_contents)} audio files")
             
             for i, audio_data in enumerate(audio_contents):
                 filename = audio_data['filename']  # dict에서 접근
@@ -149,37 +154,57 @@ class PipelineService:
                 content_type = audio_data['content_type']
                 group_name = mapping.get(filename, "Unknown Group")
                 
+                logger.info(f"Job {job_id}: Processing file {i+1}/{len(audio_contents)}: {filename}")
+                
                 try:
                     # 2. STT 처리 - 파일 내용으로 처리
-                    # STT 서비스에 파일 내용 전달하는 방법 필요
+                    logger.info(f"Job {job_id}: Starting STT for {filename}")
                     stt_result = await self.stt_service.request_stt_with_file_content(
                         audio_content, filename
                     )
                     rid = stt_result.get("rid")
+                    logger.info(f"Job {job_id}: STT request ID for {filename}: {rid}")
                     
                     if rid:
                         # STT 완료까지 대기
+                        logger.info(f"Job {job_id}: Waiting for STT completion for {filename}")
                         transcribed_text = await self.stt_service.wait_for_completion(rid)
+                        logger.info(f"Job {job_id}: STT completed for {filename}, text length: {len(transcribed_text)}")
+                        
+                        # Gemini API 호출 전 대기 시간 추가 (Rate Limiting 방지)
+                        if i > 0:  # 첫 번째 파일이 아닌 경우에만 대기
+                            wait_time = min(5, i * 2)  # 점진적으로 대기 시간 증가 (최대 5초)
+                            logger.info(f"Job {job_id}: Waiting {wait_time} seconds before Gemini API call to prevent rate limiting")
+                            await asyncio.sleep(wait_time)
                         
                         # 3. Gemini API를 통한 내용 분석
+                        logger.info(f"Job {job_id}: Starting Gemini analysis for {filename}")
                         analysis_result = await self.gemini_service.analyze_text_with_items(
                             text_content=transcribed_text,
                             custom_items=custom_items
                         )
+                        logger.info(f"Job {job_id}: Gemini analysis completed for {filename}")
                         
                         self.batch_jobs[job_id]["results"][filename] = {
                             "group": group_name,
                             "transcribed_text": transcribed_text,
                             "analysis": analysis_result
                         }
+                        logger.info(f"Job {job_id}: Successfully processed {filename}")
                     else:
-                        self.batch_jobs[job_id]["errors"][filename] = "STT 요청 ID를 받지 못했습니다."
+                        error_msg = "STT 요청 ID를 받지 못했습니다."
+                        self.batch_jobs[job_id]["errors"][filename] = error_msg
+                        logger.error(f"Job {job_id}: {error_msg} for {filename}")
                         
                 except Exception as e:
-                    self.batch_jobs[job_id]["errors"][filename] = str(e)
+                    error_msg = str(e)
+                    self.batch_jobs[job_id]["errors"][filename] = error_msg
+                    logger.error(f"Job {job_id}: Error processing {filename}: {error_msg}")
+                    logger.error(f"Job {job_id}: Exception details for {filename}", exc_info=True)
             
                 # 진행 상황 업데이트
                 self.batch_jobs[job_id]["processed_files"] = i + 1
+                logger.info(f"Job {job_id}: Progress updated: {i+1}/{len(audio_contents)}")
             
             # 작업 완료
             self.batch_jobs[job_id]["status"] = "completed"
