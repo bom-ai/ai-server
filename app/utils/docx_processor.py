@@ -4,7 +4,7 @@ DOCX 파일 처리 유틸리티
 import io
 import re
 from docx import Document
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 
 def extract_text_with_separated_tables(file_content: bytes) -> dict:
@@ -289,57 +289,103 @@ def format_items_for_prompt(structured_items: List[Dict]) -> List[str]:
     except Exception as e:
         raise Exception(f"프롬프트용 아이템 포맷팅 중 오류 발생: {str(e)}")
 
-
-def insert_analysis_into_frame_by_group(
-    frame_content: bytes,
-    analysis_by_filename: Dict[str, Dict[str, str]], 
-    filename_to_group: Dict[str, str]
-) -> Document:
+def parse_analysis_sections_any(analysis_text: str) -> Dict[str, str]:
     """
-    오디오 분석 결과를 그룹명 기준으로 DOCX 프레임 문서에 삽입합니다.
-
-    Args:
-        frame_content (bytes): DOCX 파일의 원본 바이트
-        analysis_by_filename (Dict[str, Dict[str, str]]): filename → {item → 분석 결과}
-        filename_to_group (Dict[str, str]): filename → 그룹명
-
-    Returns:
-        Document: 분석 결과가 삽입된 docx Document 객체
+    'analysis' 문자열에서 번호 섹션(### 1. ...)별 본문을 추출해
+    { '1. 제목': '본문', ... } 형태로 반환.
     """
-    # DOCX 로드
-    doc_stream = io.BytesIO(frame_content)
-    doc = Document(doc_stream)
+    text = analysis_text.replace("\r\n", "\n").replace("\r", "\n")
+    sec_pat = re.compile(r'(?m)^###\s*(\d+)\.\s*(.+?)\s*$')
+    sections = list(sec_pat.finditer(text))
 
-    # 그룹명 → {item → 분석결과} 딕셔너리 생성
+    out: Dict[str, str] = {}
+    for i, m in enumerate(sections):
+        num = m.group(1)
+        title = m.group(2).strip()
+        start = m.end()
+        end = sections[i+1].start() if i+1 < len(sections) else len(text)
+        body = text[start:end].strip()
+        out[f"{num}. {title}"] = body
+    return out
+
+def replace_analysis_with_parsed(job_result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    job_result 내 모든 파일에 대해:
+      - 'analysis'가 문자열이면 섹션 파싱하고
+      - 파싱 성공 시 'analysis'를 딕셔너리로 교체
+      - 파싱 실패/섹션 미존재 시 원문 유지
+    최종적으로 수정된 job_result 반환.
+    """
+    results = job_result.get("results") or {}
+    for file_key, file_obj in results.items():
+        analysis_text = file_obj.get("analysis")
+        if isinstance(analysis_text, str) and analysis_text.strip():
+            parsed = parse_analysis_sections_any(analysis_text)
+            if parsed:  # 섹션을 하나라도 찾았을 때만 교체
+                file_obj["analysis"] = parsed
+            # else: 섹션 패턴이 없으면 그대로 둠
+    return job_result
+
+
+def fill_frame_with_analysis_bytes(json_data: dict, frame_docx_bytes: bytes) -> bytes:
+    """
+    JSON 객체와 DOCX bytes를 받아, 분석 내용을 DOCX에 채워 넣고
+    수정된 DOCX를 bytes로 반환
+    """
+    results = json_data.get("results", {})
+    if not results:
+        print("⚠️ JSON 안에 results가 없습니다.")
+        return frame_docx_bytes
+
+    # group -> {header -> 분석내용} 매핑 생성 (키 모두 normalize)
     group_to_analysis: Dict[str, Dict[str, str]] = {}
-    for filename, item_results in analysis_by_filename.items():
-        group_name = filename_to_group.get(filename)
-        if group_name:
-            group_to_analysis[group_name] = item_results
+    for obj in results.values():
+        group = normalize_key(obj.get("group"))
+        analysis = obj.get("analysis")
+        if isinstance(analysis, dict):
+            norm_analysis = {normalize_key(k): (v or "") for k, v in analysis.items()}
+            group_to_analysis[group] = norm_analysis
 
-    # 테이블 순회
+    if not group_to_analysis:
+        print("⚠️ (group, analysis dict) 매핑이 비어있습니다.")
+        return frame_docx_bytes
+
+    # DOCX 로드 (bytes → Document)
+    doc = Document(BytesIO(frame_docx_bytes))
+    filled_count = 0
+
+    # 표 순회
     for table in doc.tables:
         if not table.rows or len(table.columns) < 2:
-            continue  # 테이블 구조가 아닌 경우 skip
+            continue
 
-        # item 이름들은 헤더(첫 번째 행)의 각 셀에서 가져옴
-        item_names = [cell.text.strip() for cell in table.rows[0].cells]
+        # 헤더(첫 행) 정규화
+        headers = [normalize_key(cell.text) for cell in table.rows[0].cells]
 
-        # 나머지 행에서 그룹명 확인 후, 해당 위치에 결과 삽입
+        # 데이터 행
         for row in table.rows[1:]:
-            group_name = row.cells[0].text.strip()  # 첫 번째 열이 그룹명
-            if group_name in group_to_analysis:
-                item_to_result = group_to_analysis[group_name]
-                for col_idx in range(1, len(row.cells)):
-                    item_name = item_names[col_idx]
-                    if item_name in item_to_result:
-                        analysis_text = item_to_result[item_name]
-                        target_cell = row.cells[col_idx]
+            group_name_norm = normalize_key(row.cells[0].text)
+            if group_name_norm not in group_to_analysis:
+                continue
+            item_to_result = group_to_analysis[group_name_norm]
 
-                        # 기존 텍스트 유지 + 분석 결과 추가
-                        p = target_cell.add_paragraph()
-                        p.add_run("[분석 결과]").bold = True
-                        p = target_cell.add_paragraph(analysis_text.strip())
+            # 각 열 채우기
+            for col_idx in range(1, len(row.cells)):
+                header_norm = headers[col_idx]
+                if header_norm in item_to_result:
+                    analysis_text = item_to_result[header_norm].strip()
+                    if analysis_text:
+                        cell = row.cells[col_idx]
+                        if cell.text.strip():
+                            cell.add_paragraph("")
+                        p = cell.add_paragraph()
+                        run = p.add_run("[분석]")
+                        run.bold = True
+                        cell.add_paragraph(analysis_text)
+                        filled_count += 1
 
-    return doc
+    # 수정된 DOCX → bytes 변환
+    output_stream = BytesIO()
+    doc.save(output_stream)
+    return output_stream.getvalue()
 
