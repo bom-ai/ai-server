@@ -1,0 +1,11 @@
+{
+  "sqltools.connections": [
+    {
+      "previewLimit": 50,
+      "driver": "SQLite",
+      "name": "bomatic",
+      "database": "bo_matic.db"
+    }
+  ],
+  "sqltools.useNodeRuntime": true
+}

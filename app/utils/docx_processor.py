@@ -288,3 +288,58 @@ def format_items_for_prompt(structured_items: List[Dict]) -> List[str]:
         
     except Exception as e:
         raise Exception(f"프롬프트용 아이템 포맷팅 중 오류 발생: {str(e)}")
+
+
+def insert_analysis_into_frame_by_group(
+    frame_content: bytes,
+    analysis_by_filename: Dict[str, Dict[str, str]], 
+    filename_to_group: Dict[str, str]
+) -> Document:
+    """
+    오디오 분석 결과를 그룹명 기준으로 DOCX 프레임 문서에 삽입합니다.
+
+    Args:
+        frame_content (bytes): DOCX 파일의 원본 바이트
+        analysis_by_filename (Dict[str, Dict[str, str]]): filename → {item → 분석 결과}
+        filename_to_group (Dict[str, str]): filename → 그룹명
+
+    Returns:
+        Document: 분석 결과가 삽입된 docx Document 객체
+    """
+    # DOCX 로드
+    doc_stream = io.BytesIO(frame_content)
+    doc = Document(doc_stream)
+
+    # 그룹명 → {item → 분석결과} 딕셔너리 생성
+    group_to_analysis: Dict[str, Dict[str, str]] = {}
+    for filename, item_results in analysis_by_filename.items():
+        group_name = filename_to_group.get(filename)
+        if group_name:
+            group_to_analysis[group_name] = item_results
+
+    # 테이블 순회
+    for table in doc.tables:
+        if not table.rows or len(table.columns) < 2:
+            continue  # 테이블 구조가 아닌 경우 skip
+
+        # item 이름들은 헤더(첫 번째 행)의 각 셀에서 가져옴
+        item_names = [cell.text.strip() for cell in table.rows[0].cells]
+
+        # 나머지 행에서 그룹명 확인 후, 해당 위치에 결과 삽입
+        for row in table.rows[1:]:
+            group_name = row.cells[0].text.strip()  # 첫 번째 열이 그룹명
+            if group_name in group_to_analysis:
+                item_to_result = group_to_analysis[group_name]
+                for col_idx in range(1, len(row.cells)):
+                    item_name = item_names[col_idx]
+                    if item_name in item_to_result:
+                        analysis_text = item_to_result[item_name]
+                        target_cell = row.cells[col_idx]
+
+                        # 기존 텍스트 유지 + 분석 결과 추가
+                        p = target_cell.add_paragraph()
+                        p.add_run("[분석 결과]").bold = True
+                        p = target_cell.add_paragraph(analysis_text.strip())
+
+    return doc
+
