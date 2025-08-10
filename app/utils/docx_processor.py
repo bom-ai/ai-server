@@ -3,8 +3,26 @@ DOCX 파일 처리 유틸리티
 """
 import io
 import re
+from io import BytesIO
 from docx import Document
 from typing import List, Dict, Optional, Any
+
+
+def normalize_key(text: str) -> str:
+    """
+    텍스트를 정규화하여 키로 사용할 수 있도록 변환합니다.
+    공백 제거, 소문자 변환, 특수문자 제거 등을 수행합니다.
+    """
+    if not text:
+        return ""
+    
+    # 앞뒤 공백 제거 및 연속된 공백을 하나로 변환
+    normalized = re.sub(r'\s+', ' ', text.strip())
+    
+    # 소문자로 변환
+    normalized = normalized.lower()
+    
+    return normalized
 
 
 def extract_text_with_separated_tables(file_content: bytes) -> dict:
@@ -256,35 +274,39 @@ def extract_table_headers_with_subitems(file_content: bytes) -> List[Dict]:
         raise Exception(f"테이블 헤더 및 세부 항목 추출 중 오류 발생: {str(e)}")
 
 
-def format_items_for_prompt(structured_items: List[Dict]) -> List[str]:
+def format_items_for_prompt(structured_items: List[Dict]) -> str:
     """
-    구조화된 테이블 아이템들을 프롬프트용 문자열 리스트로 변환합니다.
+    구조화된 테이블 아이템들을 프롬프트용 계층적 문자열로 변환합니다.
     
     Args:
         structured_items: extract_table_headers_with_subitems에서 반환된 구조화된 아이템들
         
     Returns:
-        프롬프트에 사용할 수 있는 문자열 리스트
-        예: ["헤더 (세부항목1, 세부항목2)", "헤더2", ...]
+        프롬프트에 사용할 수 있는 계층적 구조의 문자열
+        예:
+        1. 크리에이터 현황
+          - 활동 현황
+          - 활동 목표
+        2. 라이브 이용 현황
+          - 라이브 현황
+          - 가로/세로
     """
     try:
-        formatted_items = []
+        formatted_lines = []
         
-        for item in structured_items:
+        for idx, item in enumerate(structured_items, 1):
             header = item['header']
             subitems = item['subitems']
             
-            if subitems:
-                # 세부 항목이 있는 경우 헤더 뒤에 괄호로 추가
-                subitems_str = ', '.join(subitems)
-                formatted_item = f"{header} ({subitems_str})"
-            else:
-                # 세부 항목이 없는 경우 헤더만 사용
-                formatted_item = header
+            # 헤더를 번호와 함께 추가
+            formatted_lines.append(f"{idx}. {header}")
             
-            formatted_items.append(formatted_item)
+            # 세부 항목들을 들여쓰기와 함께 추가
+            if subitems:
+                for subitem in subitems:
+                    formatted_lines.append(f"  - {subitem}")
         
-        return formatted_items
+        return '\n'.join(formatted_lines)
         
     except Exception as e:
         raise Exception(f"프롬프트용 아이템 포맷팅 중 오류 발생: {str(e)}")

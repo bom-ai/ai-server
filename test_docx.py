@@ -132,8 +132,7 @@ def test_real_docx_file(file_path):
         print(f"포맷팅된 항목 수: {len(formatted_items)}")
         print("-" * 50)
         
-        for i, item in enumerate(formatted_items):
-            print(f"{i+1}. {item}")
+        print(formatted_items)
         
         print("-" * 50)
         

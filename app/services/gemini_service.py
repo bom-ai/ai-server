@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from typing import List, Optional
 
 from app.core.config import settings
-from app.core.prompts import generate_system_prompt
+from app.core.prompts import generate_system_prompt_from_docx
 
 
 class GeminiService:
@@ -87,7 +87,7 @@ class GeminiService:
                 logger.info(f"Gemini API call attempt {attempt + 1}/{max_retries}")
                 
                 # custom_items를 기반으로 시스템 프롬프트 생성
-                system_prompt = generate_system_prompt(custom_items or [])
+                system_prompt = generate_system_prompt_from_docx(custom_items or [])
                 
                 model = genai.GenerativeModel(
                     model_name='gemini-2.5-pro',
