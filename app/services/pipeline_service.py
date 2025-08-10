@@ -74,14 +74,11 @@ class PipelineService:
         if job_id not in self.batch_jobs:
             raise ValueError("해당 작업을 찾을 수 없습니다.")
         
-        job = self.batch_jobs[job_id]
-        if job["status"] != "completed":
+        job_completed = self.batch_jobs[job_id]
+        if job_completed["status"] != "completed":
             raise ValueError("작업이 아직 완료되지 않았습니다.")
         
-        return {
-            "results": job["results"],
-            "errors": job.get("errors", {})
-        }
+        return job_completed
     
     async def _batch_analysis_task(
         self, 

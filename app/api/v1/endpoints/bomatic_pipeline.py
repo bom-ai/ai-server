@@ -1,11 +1,17 @@
 """
 전체 파이프라인 API 엔드포인트
 """
+import json
 from typing import List
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response
 
 from app.models.schemas import BatchAnalysisResponse, FileMappingValidation
 from app.services.pipeline_service import pipeline_service
+from app.utils.docx_processor import (
+    fill_frame_with_analysis_bytes,
+    replace_analysis_with_parsed,
+    parse_analysis_sections_any,
+)
 
 router = APIRouter()
 
@@ -117,16 +123,89 @@ async def get_batch_status(job_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.get("/download/{job_id}")
-async def download_analysis_result(job_id: str):
-    """분석 결과 파일을 다운로드합니다."""
+@router.post("/download/{job_id}")
+async def download_analysis_result(job_id: str, frame: UploadFile = File(...)):
+    """
+    사용자로부터 DOCX 템플릿 파일을 받아, 분석 결과를 채워 다운로드합니다.
+    """
     try:
-        results = await pipeline_service.get_batch_results(job_id)
-        
-        return {
-            "message": "파일 다운로드 준비 완료",
-            "results": results["results"],
-            "errors": results["errors"]
+        # 파일이 DOCX 형식인지 간단히 확인 (선택 사항이지만 권장)
+        if not frame.filename.endswith('.docx'):
+            raise HTTPException(status_code=400, detail="Invalid file type. Please upload a .docx file.")
+
+        job_info = await pipeline_service.get_batch_results(job_id)
+        parsed_job_info = replace_analysis_with_parsed(job_info)
+
+        frame_docx_bytes = await frame.read()
+
+        modified_docx_bytes = fill_frame_with_analysis_bytes(
+            json_data=parsed_job_info,
+            frame_docx_bytes=frame_docx_bytes
+        )
+
+        file_name = f"analysis_result_{job_id}.docx"
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{file_name}"'
         }
+
+        return Response(content=modified_docx_bytes, media_type=media_type, headers=headers)
+
     except ValueError as e:
         raise HTTPException(status_code=404 if "찾을 수 없습니다" in str(e) else 400, detail=str(e))
+    finally:
+        # 업로드된 파일의 임시 리소스를 닫아줍니다.
+        await frame.close()
+
+@router.post("/download/direct")
+async def download_analysis_result_direct(
+    frame: UploadFile = File(...),
+    json_file: UploadFile = File(...)
+):
+    """
+    (임시) 사용자로부터 DOCX 템플릿 파일과 job_info JSON 파일을 직접 받아
+    분석 결과를 채워 다운로드합니다.
+    """
+    # 1. 파일 형식 확인
+    if not frame.filename.endswith('.docx'):
+        raise HTTPException(status_code=400, detail="The 'frame' file must be a .docx file.")
+    if not json_file.filename.endswith('.json'):
+        raise HTTPException(status_code=400, detail="The 'json_file' must be a .json file.")
+
+    json_content = None
+    try:
+        # 2. 업로드된 JSON 파일의 내용을 읽고 파싱
+        json_content = await json_file.read()
+        job_info = json.loads(json_content)
+
+        # 3. 기존 로직 재사용
+        parsed_job_info = replace_analysis_with_parsed(job_info)
+
+        frame_docx_bytes = await frame.read()
+
+        modified_docx_bytes = fill_frame_with_analysis_bytes(
+            json_data=parsed_job_info,
+            frame_docx_bytes=frame_docx_bytes
+        )
+
+        # 4. 파일 다운로드 응답 생성
+        file_name = "direct_analysis_result.docx"
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{file_name}"'
+        }
+
+        return Response(content=modified_docx_bytes, media_type=media_type, headers=headers)
+
+    except json.JSONDecodeError:
+        # json_content가 있을 경우 디버깅을 위해 출력
+        error_detail = "Invalid JSON format in 'json_file'."
+        if json_content:
+            error_detail += f" Content: {json_content[:200].decode(errors='ignore')}"
+        raise HTTPException(status_code=400, detail=error_detail)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+    finally:
+        # 5. 업로드된 두 파일의 임시 리소스를 모두 닫아줍니다.
+        await frame.close()
+        await json_file.close()
