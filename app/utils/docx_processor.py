@@ -168,109 +168,91 @@ def extract_research_user_groups(table_data_rows: list) -> dict:
 
 def extract_table_headers_with_subitems(file_content: bytes) -> List[Dict]:
     """
-    DOCX 파일에서 테이블 헤더와 해당 테이블의 세부 항목들을 추출합니다.
-    
-    Args:
-        file_content: DOCX 파일의 바이트 내용
-        
-    Returns:
-        [
-            {
-                'header': '테이블 헤더 텍스트',
-                'subitems': ['세부 항목 1', '세부 항목 2', ...],
-                'table_index': 테이블 인덱스
-            },
-            ...
-        ]
+    DOCX 파일에서 테이블 헤더와 해당 테이블의 세부 항목들을 추출합니다. (디버깅 모드)
     """
+    print("➡️ 함수 'extract_table_headers_with_subitems' 실행 시작")
+    
     try:
-        # 바이트 데이터를 메모리 스트림으로 변환
+        if not isinstance(file_content, bytes):
+            print(f"❌ 오류: 입력된 file_content가 bytes 타입이 아닙니다. (타입: {type(file_content)})")
+            raise TypeError("a bytes-like object is required, not 'str'")
+
+        print(f"   - 입력된 파일 크기: {len(file_content)} bytes")
         file_stream = io.BytesIO(file_content)
         
-        # Document 객체 생성
         doc = Document(file_stream)
+        print("   📄 DOCX 파일 로드 성공")
         
         structured_items = []
+        print(f"   - 문서에서 총 {len(doc.tables)}개의 테이블 발견")
         
         for table_idx, table in enumerate(doc.tables):
+            print(f"\n🔍 {table_idx}번 테이블 처리 중...")
             if len(table.rows) == 0:
+                print("   - 테이블에 행이 없어 건너뜁니다.")
                 continue
                 
-            # 첫 번째 행에서 헤더 추출
             header_row = table.rows[0]
             header_text = ""
             
-            # 헤더 행의 모든 셀에서 텍스트 추출
-            for cell in header_row.cells:
-                cell_text = cell.text.strip()
-                if cell_text and not header_text:  # 첫 번째 비어있지 않은 셀을 헤더로 사용
+            # 헤더 텍스트 후보들을 모두 확인
+            header_candidates = [cell.text.strip() for cell in header_row.cells]
+            print(f"   - 헤더 행 후보 텍스트: {header_candidates}")
+
+            for cell_text in header_candidates:
+                if cell_text:
                     header_text = cell_text
+                    print(f"   - 테이블 헤더를 '{header_text}'로 확정")
                     break
             
             if not header_text:
+                print("   - 유효한 헤더를 찾지 못해 건너뜁니다.")
                 continue
                 
-            # 세부 항목 추출
             subitems = []
             
-            # 테이블의 모든 행을 확인하여 세부 항목 찾기
-            for row in table.rows[1:]:  # 헤더 제외
-                for cell in row.cells:
+            for row_idx, row in enumerate(table.rows[1:], start=1):
+                for col_idx, cell in enumerate(row.cells):
                     cell_text = cell.text.strip()
-                    if cell_text:
-                        # 줄바꿈으로 분리된 항목들 확인
-                        lines = cell_text.split('\n')
-                        for line in lines:
-                            line = line.strip()
-                            
-                            # 빈 줄이나 너무 짧은 텍스트는 제외
-                            if not line or len(line) < 2:
-                                continue
-                            
-                            # 일반적인 테이블 데이터 패턴 제외 (예: "30-37", "사용자", "경쟁" 등)
-                            # 숫자-숫자 패턴 제외
-                            if re.match(r'^\d+-\d+$', line):
-                                continue
-                            
-                            # 단순한 단어 하나만 있는 경우 제외 (예: "사용자", "경쟁")
-                            if len(line.split()) == 1 and len(line) < 10:
-                                continue
-                            
-                            # "- " 로 시작하는 항목들 (리스트 형태)
-                            if line.startswith('- '):
-                                item_text = line[2:].strip()
-                                if item_text and item_text not in subitems and len(item_text) < 200:
-                                    subitems.append(item_text)
-                            
-                            # "•" 로 시작하는 항목들 (불릿 포인트)
-                            elif line.startswith('• '):
-                                item_text = line[2:].strip()
-                                if item_text and item_text not in subitems and len(item_text) < 200:
-                                    subitems.append(item_text)
-                            
-                            # 숫자로 시작하는 항목들 (예: "1. 항목명", "1) 항목명")
-                            elif re.match(r'^\d+[\.\)]\s+', line):
-                                item_text = re.sub(r'^\d+[\.\)]\s+', '', line).strip()
-                                if item_text and item_text not in subitems and len(item_text) < 200:
-                                    subitems.append(item_text)
-                            
-                            # 그 외의 의미있는 텍스트 (줄바꿈으로 구분된 일반 항목들)
-                            # 단, 너무 긴 텍스트나 일반적인 테이블 데이터가 아닌 경우
-                            elif (len(line) > 10 and len(line) < 200 and 
-                                  not re.match(r'^\d+$', line) and  # 숫자만 있는 것 제외
-                                  '|' not in line):  # 테이블 구분자가 있는 것 제외
-                                if line not in subitems:
-                                    subitems.append(line)
-            
+                    if not cell_text:
+                        continue
+                    
+                    # print(f"     - [행:{row_idx}, 열:{col_idx}] 셀 내용 확인: \"{cell_text[:30]}...\"")
+                    lines = cell_text.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        
+                        if not line or len(line) < 2: continue
+                        if re.match(r'^\d+-\d+$', line): continue
+                        if len(line.split()) == 1 and len(line) < 10: continue
+                        
+                        item_text = None
+                        if line.startswith('- '):
+                            item_text = line[2:].strip()
+                        elif line.startswith('• '):
+                            item_text = line[2:].strip()
+                        elif re.match(r'^\d+[\.\)]\s+', line):
+                            item_text = re.sub(r'^\d+[\.\)]\s+', '', line).strip()
+                        elif (len(line) > 10 and len(line) < 200 and not re.match(r'^\d+$', line) and '|' not in line):
+                            item_text = line
+                        
+                        if item_text and item_text not in subitems and len(item_text) < 200:
+                            print(f"    ✔️ ['{item_text}'] 항목 추가")
+                            subitems.append(item_text)
+
+            print(f"   - '{header_text}' 헤더에 총 {len(subitems)}개의 세부 항목 추출 완료.")
             structured_items.append({
                 'header': header_text,
                 'subitems': subitems,
                 'table_index': table_idx
             })
         
+        print(f"\n🏁 함수 실행 완료. 총 {len(structured_items)}개의 구조화된 항목 반환.")
         return structured_items
         
     except Exception as e:
+        print(f"❌ 함수 실행 중 치명적인 오류 발생: {str(e)}")
+        # 원래 오류를 포함하여 새로운 예외를 발생시켜, 어디서 문제가 생겼는지 추적하기 쉽게 함
         raise Exception(f"테이블 헤더 및 세부 항목 추출 중 오류 발생: {str(e)}")
 
 
