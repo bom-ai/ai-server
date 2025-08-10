@@ -157,7 +157,8 @@ async def download_analysis_result(job_id: str, frame: UploadFile = File(...)):
         # 업로드된 파일의 임시 리소스를 닫아줍니다.
         await frame.close()
 
-@router.post("/download/direct")
+
+@router.post("/download-test")
 async def download_analysis_result_direct(
     frame: UploadFile = File(...),
     json_file: UploadFile = File(...)

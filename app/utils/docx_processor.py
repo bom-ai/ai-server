@@ -3,6 +3,7 @@ DOCX 파일 처리 유틸리티
 """
 import io
 import re
+import json
 from io import BytesIO
 from docx import Document
 from typing import List, Dict, Optional, Any
@@ -293,6 +294,7 @@ def format_items_for_prompt(structured_items: List[Dict]) -> str:
     except Exception as e:
         raise Exception(f"프롬프트용 아이템 포맷팅 중 오류 발생: {str(e)}")
 
+
 def parse_analysis_sections_any(analysis_text: str) -> Dict[str, str]:
     """
     'analysis' 문자열에서 번호 섹션(### 1. ...)별 본문을 추출해
@@ -311,6 +313,7 @@ def parse_analysis_sections_any(analysis_text: str) -> Dict[str, str]:
         body = text[start:end].strip()
         out[f"{num}. {title}"] = body
     return out
+
 
 def replace_analysis_with_parsed(job_result: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -334,8 +337,11 @@ def replace_analysis_with_parsed(job_result: Dict[str, Any]) -> Dict[str, Any]:
 def fill_frame_with_analysis_bytes(json_data: dict, frame_docx_bytes: bytes) -> bytes:
     """
     JSON 객체와 DOCX bytes를 받아, 분석 내용을 DOCX에 채워 넣고
-    수정된 DOCX를 bytes로 반환 (print 출력으로 디버깅)
+    수정된 DOCX를 bytes로 반환 (강화된 디버깅)
     """
+    print("🔥 === fill_frame_with_analysis_bytes 함수 시작 ===")
+    print(f"JSON 데이터 구조: {json.dumps(json_data, indent=2, ensure_ascii=False)[:1000]}...")
+    
     results = json_data.get("results", {})
     if not results:
         print("⚠️ WARNING: JSON 데이터에 'results'가 없거나 비어있습니다.")
@@ -344,83 +350,160 @@ def fill_frame_with_analysis_bytes(json_data: dict, frame_docx_bytes: bytes) -> 
     # 1. JSON 데이터를 파싱하여 {group: {header: analysis}} 형태의 맵 생성
     group_to_analysis: Dict[str, Dict[str, str]] = {}
     print("➡️ JSON 데이터 파싱을 시작합니다...")
+    
     for file_key, obj in results.items():
+        print(f"\n📁 파일 '{file_key}' 처리 중...")
+        # print(f"   - 원본 객체: {obj}")
+        
         group = obj.get("group")
         analysis = obj.get("analysis")
         
+        # print(f"   - 그룹명: '{group}'")
+        # print(f"   - 분석 타입: {type(analysis)}")
+        # print(f"   - 분석 내용: {analysis}")
+        
         if not group or not isinstance(analysis, dict):
-            print(f"  - ⚠️ WARNING: [{file_key}] 건너뜀: 'group'이 없거나 'analysis'가 dict가 아님 (group: {group}, analysis 타입: {type(analysis)})")
+            print(f"  - ⚠️ WARNING: [{file_key}] 건너뜀: 'group'이 없거나 'analysis'가 dict가 아님")
             continue
         
         norm_group = normalize_key(group)
-        norm_analysis = {normalize_key(k): (v or "") for k, v in analysis.items()}
+        print(f"   - 정규화된 그룹명: '{norm_group}'")
+        
+        norm_analysis = {}
+        for k, v in analysis.items():
+            norm_k = normalize_key(k)
+            norm_analysis[norm_k] = v or ""
+            print(f"   - 분석 키: '{k}' → '{norm_k}', 값 길이: {len(str(v))}")
+        
         group_to_analysis[norm_group] = norm_analysis
         print(f"  - [파싱 성공] 그룹 '{norm_group}'에 대한 분석 내용 {len(norm_analysis)}개 처리 완료.")
 
+    print(f"\n✅ 파싱 완료! group_to_analysis 맵:")
+    for group, analysis in group_to_analysis.items():
+        print(f"   - '{group}': {list(analysis.keys())}")
+
     if not group_to_analysis:
-        print("🚨 ERROR: 파싱 후 생성된 분석 데이터 맵(group_to_analysis)이 비어있습니다. JSON 구조를 확인하세요.")
+        print("🚨 ERROR: 파싱 후 생성된 분석 데이터 맵이 비어있습니다!")
         return frame_docx_bytes
-    
-    print(f"✅ 총 {len(group_to_analysis)}개의 그룹 데이터 파싱 완료. 생성된 키: {list(group_to_analysis.keys())}")
 
     # 2. DOCX 파일 로드
     try:
         doc = Document(BytesIO(frame_docx_bytes))
         print(f"📄 DOCX 파일을 성공적으로 로드했습니다. 총 {len(doc.tables)}개의 표가 있습니다.")
-    except OpcError as e:
-        print(f"🚨 ERROR: DOCX 파일 로드 실패! 파일이 손상되었거나 유효한 DOCX 형식이 아닙니다. 오류: {e}")
+    except Exception as e:
+        print(f"🚨 ERROR: DOCX 파일 로드 실패! 오류: {e}")
         return frame_docx_bytes
 
     filled_count = 0
 
     # 3. 표 순회 및 데이터 채우기
     for i, table in enumerate(doc.tables):
-        print(f"\n🔍 {i+1}번째 표를 분석합니다.")
+        print(f"\n🔍 === {i+1}번째 표 분석 ===")
         if not table.rows or len(table.columns) < 2:
             print("  - ⚠️ WARNING: 표에 행이 없거나 열이 2개 미만이라 건너뜁니다.")
             continue
 
-        headers = [normalize_key(cell.text) for cell in table.rows[0].cells]
-        print(f"  - DOCX 표 헤더: {headers}")
+        # 헤더 분석
+        headers = []
+        for j, cell in enumerate(table.rows[0].cells):
+            original_header = cell.text.strip()
+            normalized_header = normalize_key(original_header)
+            headers.append(normalized_header)
+            print(f"   - 헤더 {j}: '{original_header}' → '{normalized_header}'")
+
+        print(f"   - 정규화된 헤더들: {headers}")
 
         # 데이터 행 순회
-        for r, row in enumerate(table.rows[1:]):
-            group_name_from_docx = row.cells[0].text
+        for r, row in enumerate(table.rows[1:], start=1):
+            if not row.cells:
+                continue
+                
+            # 첫 번째 열에서 그룹명 추출
+            group_cell = row.cells[0]
+            group_name_from_docx = group_cell.text.strip()
             group_name_norm = normalize_key(group_name_from_docx)
             
-            # DOCX의 그룹 이름이 파싱된 데이터 맵에 있는지 확인 (가장 중요한 매칭)
-            if group_name_norm not in group_to_analysis:
-                print(f"    - [매칭 실패] 행 {r+2}: DOCX 그룹명 '{group_name_from_docx}' (정규화: '{group_name_norm}')이(가) JSON 데이터에 없습니다.")
-                continue
+            print(f"\n   📋 행 {r+1} 처리:")
+            print(f"      - 원본 그룹명: '{group_name_from_docx}'")
+            print(f"      - 정규화된 그룹명: '{group_name_norm}'")
+            print(f"      - 사용 가능한 그룹들: {list(group_to_analysis.keys())}")
             
-            print(f"    - [매칭 성공] 행 {r+2}: DOCX 그룹명 '{group_name_norm}'을(를) 찾았습니다. 셀 채우기를 시작합니다.")
-            item_to_result = group_to_analysis[group_name_norm]
+            # 그룹명 매칭 확인
+            matched_group = None
+            if group_name_norm in group_to_analysis:
+                matched_group = group_name_norm
+                print(f"      - ✅ 정확히 매칭됨: '{matched_group}'")
+            else:
+                # 부분 매칭 시도
+                for available_group in group_to_analysis.keys():
+                    if available_group in group_name_norm or group_name_norm in available_group:
+                        matched_group = available_group
+                        print(f"      - ✅ 부분 매칭됨: '{group_name_norm}' ↔ '{available_group}'")
+                        break
+                
+                if not matched_group:
+                    print(f"      - ❌ 매칭 실패! '{group_name_norm}'에 해당하는 그룹을 찾을 수 없습니다.")
+                    continue
+            
+            item_to_result = group_to_analysis[matched_group]
+            print(f"      - 매칭된 분석 결과: {list(item_to_result.keys())}")
 
             # 각 열 채우기
-            for c, cell in enumerate(row.cells[1:]):
-                col_idx = c + 1
-                header_norm = headers[col_idx]
-                
-                # DOCX의 헤더가 해당 그룹의 분석 결과에 있는지 확인
-                if header_norm not in item_to_result:
-                    print(f"      - [헤더 매칭 실패] 열 {col_idx+1}: 헤더 '{header_norm}'에 해당하는 분석 결과가 없습니다.")
+            for c, cell in enumerate(row.cells[1:], start=1):
+                if c >= len(headers):
                     continue
+                    
+                header_norm = headers[c]
+                print(f"         - 열 {c+1} ('{header_norm}') 처리 중...")
+                print(f"         - 사용 가능한 분석 키들: {list(item_to_result.keys())}")
+                
+                # 헤더 매칭 확인
+                matched_header = None
+                if header_norm in item_to_result:
+                    matched_header = header_norm
+                    print(f"         - ✅ 정확히 매칭됨: '{matched_header}'")
+                else:
+                    # 부분 매칭 시도
+                    for available_key in item_to_result.keys():
+                        if available_key in header_norm or header_norm in available_key:
+                            matched_header = available_key
+                            print(f"         - ✅ 부분 매칭됨: '{header_norm}' ↔ '{available_key}'")
+                            break
+                    
+                    if not matched_header:
+                        print(f"         - ❌ 헤더 매칭 실패: '{header_norm}'")
+                        continue
 
-                analysis_text = item_to_result[header_norm].strip()
+                analysis_text = item_to_result[matched_header].strip()
                 if analysis_text:
-                    print(f"      - [셀 채우기] 행 {r+2}, 열 {col_idx+1} ('{header_norm}')에 내용을 추가합니다.")
+                    print(f"         - ✅ 내용 채우기: {len(analysis_text)}자")
+                    
+                    # 기존 내용 확인
                     if cell.text.strip():
-                        cell.add_paragraph("") # 기존 내용과 분리를 위한 빈 줄
+                        print(f"         - 기존 내용 있음: '{cell.text[:50]}...'")
+                        cell.add_paragraph("")  # 빈 줄 추가
+                    
+                    # 분석 내용 추가
                     p = cell.add_paragraph()
-                    run = p.add_run("[분석]")
+                    run = p.add_run("[분석 결과]")
                     run.bold = True
                     cell.add_paragraph(analysis_text)
                     filled_count += 1
+                    print(f"         - ✅ 셀 채우기 완료 (총 {filled_count}개)")
                 else:
-                    print(f"      - [내용 없음] 열 {col_idx+1}: 헤더 '{header_norm}'에 해당하는 분석 내용은 있지만 비어있습니다.")
+                    print(f"         - ⚠️ 분석 내용이 비어있음")
 
-    print(f"\n🏁 모든 작업 완료. 총 {filled_count}개의 셀에 분석 내용을 채웠습니다.")
+    print(f"\n🏁 === 작업 완료 ===")
+    print(f"총 {filled_count}개의 셀에 분석 내용을 채웠습니다.")
+    
+    if filled_count == 0:
+        print("🚨 WARNING: 어떤 셀에도 내용을 채우지 못했습니다!")
+        print("매칭 실패 원인을 확인하세요:")
+        print("1. 그룹명 매칭 문제")
+        print("2. 헤더명 매칭 문제") 
+        print("3. JSON 데이터 구조 문제")
 
+    # 수정된 DOCX 저장
     output_stream = BytesIO()
     doc.save(output_stream)
     return output_stream.getvalue()
