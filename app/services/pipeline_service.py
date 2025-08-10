@@ -24,52 +24,6 @@ class PipelineService:
         # 배치 작업 저장소
         self.batch_jobs = {}
     
-    async def bomatic_pipeline(
-        self,
-        audio_url: str,
-        language: str = "ko",
-        enable_speaker_diarization: bool = True,
-        custom_items: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
-        """음성 변환부터 텍스트 분석까지 전체 파이프라인을 실행합니다."""
-        
-        # 1단계: STT 요청
-        stt_result = await self.stt_service.request_stt(
-            audio_url, language, enable_speaker_diarization
-        )
-        rid = stt_result.get("rid")
-        
-        if not rid:
-            raise ValueError("STT 요청 ID를 받지 못했습니다.")
-        
-        # 2단계: STT 완료까지 대기
-        transcribed_text = await self.stt_service.wait_for_completion(rid)
-        
-        # 3단계: Gemini 분석 (커스텀 Items 전달)
-        analysis_result = await self.gemini_service.analyze_text(
-            transcribed_text, custom_items
-        )
-        
-        return {
-            "stt_rid": rid,
-            "transcribed_text": transcribed_text,
-            "analysis_result": analysis_result
-        }
-    
-    async def analyze_text_with_custom_prompt(
-        self,
-        text_content: str,
-        system_prompt: str
-    ) -> str:
-        """커스텀 시스템 프롬프트를 사용하여 텍스트를 분석합니다."""
-        
-        # Gemini 서비스에 커스텀 프롬프트로 분석 요청
-        analysis_result = await self.gemini_service.analyze_with_custom_prompt(
-            text_content, system_prompt
-        )
-        
-        return analysis_result
-    
     async def start_batch_analysis(
         self,
         frame_content: bytes,
@@ -179,7 +133,7 @@ class PipelineService:
                         
                         # 3. Gemini API를 통한 내용 분석
                         logger.info(f"Job {job_id}: Starting Gemini analysis for {filename}")
-                        analysis_result = await self.gemini_service.analyze_text_with_items(
+                        analysis_result = await self.gemini_service.analyze_text(
                             text_content=transcribed_text,
                             custom_items=custom_items
                         )

@@ -116,22 +116,6 @@ async def get_batch_status(job_id: str):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-@router.get("/analyze-status/{job_id}")
-async def get_analyze_status(job_id: str):
-    """분석 작업 상태를 확인합니다."""
-    try:
-        job_info = await pipeline_service.get_batch_status(job_id)
-        
-        return {
-            "status": job_info["status"],
-            "message": job_info["message"],
-            "job_id": job_id,
-            "total_files": job_info["total_files"],
-            "processed_files": job_info["processed_files"]
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
 
 @router.get("/download/{job_id}")
 async def download_analysis_result(job_id: str):
