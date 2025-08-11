@@ -5,7 +5,7 @@ import asyncio
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from fastapi import HTTPException
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from app.core.config import settings
 from app.core.prompts import generate_system_prompt_from_docx
@@ -33,7 +33,8 @@ class GeminiService:
     async def analyze_text(
         self,
         text_content: str,
-        custom_items: Optional[List[str]] = None
+        custom_items: Optional[List[str]] = None,
+        template_type: Literal["raw", "refined"] = "refined"
     ) -> str:
         """Gemini API - custom_items를 사용하여 텍스트를 분석합니다."""
         import logging
@@ -61,7 +62,10 @@ class GeminiService:
                 logger.info(f"Gemini API call attempt {attempt + 1}/{max_retries}")
                 
                 # custom_items를 기반으로 시스템 프롬프트 생성
-                system_prompt = generate_system_prompt_from_docx(custom_items or [])
+                system_prompt = generate_system_prompt_from_docx(
+                    file_content=(custom_items or []),
+                    template_type=template_type
+                )
                 
                 model = genai.GenerativeModel(
                     model_name='gemini-2.5-pro',

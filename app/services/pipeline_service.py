@@ -3,7 +3,7 @@
 """
 import asyncio
 import uuid
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Literal
 from fastapi import UploadFile
 
 from app.services.stt_service import stt_service
@@ -28,7 +28,8 @@ class PipelineService:
         self,
         frame_content: bytes,
         audio_contents: List[dict],
-        mapping: dict
+        mapping: dict,
+        template_type: Literal["raw", "refined"]
     ) -> str:
         """배치 분석 작업을 시작하고 job_id를 반환합니다."""
         
@@ -58,7 +59,13 @@ class PipelineService:
         }
         
         # 백그라운드에서 배치 처리 작업 시작
-        asyncio.create_task(self._batch_analysis_task(job_id, frame_content, audio_contents, mapping))
+        asyncio.create_task(self._batch_analysis_task(
+            job_id, 
+            frame_content, 
+            audio_contents, 
+            mapping,
+            template_type
+        ))
         
         return job_id
     
@@ -85,7 +92,8 @@ class PipelineService:
         job_id: str, 
         frame_content: bytes, 
         audio_contents: List[dict],
-        mapping: dict
+        mapping: dict,
+        template_type: Literal["raw", "refined"]
     ):
         """배치 분석 작업을 백그라운드에서 처리합니다."""
         import logging
@@ -132,7 +140,8 @@ class PipelineService:
                         logger.info(f"Job {job_id}: Starting Gemini analysis for {filename}")
                         analysis_result = await self.gemini_service.analyze_text(
                             text_content=transcribed_text,
-                            custom_items=custom_items
+                            custom_items=custom_items,
+                            template_type=template_type
                         )
                         logger.info(f"Job {job_id}: Gemini analysis completed for {filename}")
                         

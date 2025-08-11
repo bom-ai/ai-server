@@ -2,8 +2,8 @@
 전체 파이프라인 API 엔드포인트
 """
 import json
-from typing import List
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response
+from typing import List, Literal
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response, Query
 
 from app.models.schemas import BatchAnalysisResponse, FileMappingValidation
 from app.services.pipeline_service import pipeline_service
@@ -20,7 +20,11 @@ router = APIRouter()
 async def bomatic_analyze(
     frame: UploadFile = File(..., description="분석 프레임 (.docx 파일)"),
     audios: List[UploadFile] = File(..., description="오디오 파일들 (.mp3 등)"),
-    mapping: str = Form(..., description="오디오 파일과 그룹명 매핑 (JSON 문자열)")
+    mapping: str = Form(..., description="오디오 파일과 그룹명 매핑 (JSON 문자열)"),
+    template_type: Literal["raw", "refined"] = Query(
+        "refined",
+        description="분석에 사용할 프롬프트 템플릿 ('raw' 또는 'refined')"
+    )
 ):
     """
     여러 오디오 파일과 프레임을 한 번에 업로드하여 배치 분석을 수행합니다.
@@ -90,7 +94,8 @@ async def bomatic_analyze(
         job_id = await pipeline_service.start_batch_analysis(
             frame_content, 
             audio_contents,  # UploadFile 대신 내용을 전달
-            mapping_dict
+            mapping_dict,
+            template_type
         )
         
         return BatchAnalysisResponse(

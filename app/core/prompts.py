@@ -2,7 +2,7 @@
 시스템 프롬프트 관리
 for Google Gemini API
 """
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Literal
 
 FGD_ANALYSIS_TEMPLATE_RAW = """
 ```
@@ -134,7 +134,10 @@ def format_items_list(items: List[str]) -> str:
     return "\n".join([f"{i+1}. {item}" for i, item in enumerate(items)])
 
 
-def generate_system_prompt_from_docx(file_content: bytes) -> str:
+def generate_system_prompt_from_docx(
+    file_content: bytes,
+    template_type: Literal["raw", "refined"] = "refined"
+) -> str:
     """
     DOCX 파일에서 추출한 테이블 구조를 기반으로 시스템 프롬프트를 생성합니다.
     
@@ -150,6 +153,14 @@ def generate_system_prompt_from_docx(file_content: bytes) -> str:
             format_items_for_prompt
         )
         
+        if template_type == "raw":
+            selected_template = FGD_ANALYSIS_TEMPLATE_RAW
+        elif template_type == "refined":
+            selected_template = FGD_ANALYSIS_TEMPLATE_REFINED
+        else:
+            # 유효하지 않은 인자가 들어올 경우 에러 발생
+            raise ValueError("template_type 인자는 'raw' 또는 'refined' 값만 가능합니다.")
+        
         # DOCX에서 구조화된 테이블 정보 추출
         structured_items = extract_table_headers_with_subitems(file_content)
         
@@ -157,7 +168,7 @@ def generate_system_prompt_from_docx(file_content: bytes) -> str:
         custom_items_str = format_items_for_prompt(structured_items)
         
         # 시스템 프롬프트 생성 (문자열을 직접 삽입)
-        return FGD_ANALYSIS_TEMPLATE_REFINED.format(items_list=custom_items_str)
+        return selected_template.format(items_list=custom_items_str)
         
     except Exception as e:
         # 오류 발생 시 기본 프롬프트 반환
