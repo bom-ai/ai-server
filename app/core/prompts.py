@@ -135,24 +135,19 @@ def format_items_list(items: List[str]) -> str:
 
 
 def generate_system_prompt_from_docx(
-    file_content: bytes,
+    file_content,  # bytes 또는 str을 받을 수 있도록 타입 힌트 제거
     template_type: Literal["raw", "refined"] = "refined"
 ) -> str:
     """
     DOCX 파일에서 추출한 테이블 구조를 기반으로 시스템 프롬프트를 생성합니다.
     
     Args:
-        file_content: DOCX 파일의 바이트 내용
+        file_content: DOCX 파일의 바이트 내용 또는 이미 처리된 커스텀 아이템 문자열
     
     Returns:
         완성된 시스템 프롬프트 문자열
     """
     try:
-        from ..utils.docx_processor import (
-            extract_table_headers_with_subitems,
-            format_items_for_prompt
-        )
-        
         if template_type == "raw":
             selected_template = FGD_ANALYSIS_TEMPLATE_RAW
         elif template_type == "refined":
@@ -161,11 +156,18 @@ def generate_system_prompt_from_docx(
             # 유효하지 않은 인자가 들어올 경우 에러 발생
             raise ValueError("template_type 인자는 'raw' 또는 'refined' 값만 가능합니다.")
         
-        # DOCX에서 구조화된 테이블 정보 추출
-        structured_items = extract_table_headers_with_subitems(file_content)
-        
-        # 프롬프트용 문자열로 변환
-        custom_items_str = format_items_for_prompt(structured_items)
+        # file_content가 bytes인지 확인하여 처리 방식 결정
+        if isinstance(file_content, bytes):
+            # bytes인 경우: DOCX 파일에서 구조화된 테이블 정보 추출
+            from ..utils.docx_processor import (
+                extract_table_headers_with_subitems,
+                format_items_for_prompt
+            )
+            structured_items = extract_table_headers_with_subitems(file_content)
+            custom_items_str = format_items_for_prompt(structured_items)
+        else:
+            # bytes가 아닌 경우: 이미 처리된 custom_items 문자열로 사용
+            custom_items_str = str(file_content) if file_content else ""
         
         # 시스템 프롬프트 생성 (문자열을 직접 삽입)
         return selected_template.format(items_list=custom_items_str)
