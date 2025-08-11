@@ -17,8 +17,8 @@ def normalize_key(text: str) -> str:
     if not text:
         return ""
     
-    # 앞뒤 공백 제거 및 연속된 공백을 하나로 변환
-    normalized = re.sub(r'\s+', ' ', text.strip())
+    # 앞뒤 모든 공백 제거 (e.g., 30-37사용자)
+    normalized = re.sub(r'\s+', '', text.strip())
     
     # 소문자로 변환
     normalized = normalized.lower()
