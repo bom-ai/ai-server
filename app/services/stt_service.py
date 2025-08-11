@@ -169,7 +169,7 @@ class STTService:
         }
         
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
                     self.base_url,  # 올바른 URL 사용
                     headers=headers,
