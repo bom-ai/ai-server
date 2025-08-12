@@ -3,10 +3,14 @@
 """
 import json
 from typing import List, Literal
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response, Query, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
 
 from app.models.schemas import BatchAnalysisResponse, FileMappingValidation
 from app.services.pipeline_service import pipeline_service
+from app.services.auth_service import AuthService
+from app.models.database import get_db
 from app.utils.docx_processor import (
     fill_frame_with_analysis_bytes,
     replace_analysis_with_parsed,
@@ -14,6 +18,60 @@ from app.utils.docx_processor import (
 )
 
 router = APIRouter()
+security = HTTPBearer()
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    토큰을 검증하고 현재 사용자 정보를 반환합니다.
+    """
+    token = credentials.credentials
+    try:
+        # JWT 토큰 검증하여 payload 얻기
+        payload = AuthService.verify_token(token)
+        email = payload.get("sub")
+        
+        if not email:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token payload",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # 데이터베이스에서 사용자 정보 조회
+        user = AuthService.get_user_by_email(db, email)
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if not user.is_active:
+            raise HTTPException(
+                status_code=401,
+                detail="Inactive user",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # 실제 사용자 정보 반환
+        return {
+            "user_id": user.id,
+            "email": user.email,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 @router.post("/analyze", response_model=BatchAnalysisResponse)
@@ -24,7 +82,8 @@ async def bomatic_analyze(
     template_type: Literal["raw", "refined"] = Query(
         "refined",
         description="분석에 사용할 프롬프트 템플릿 ('raw' 또는 'refined')"
-    )
+    ),
+    current_user = Depends(get_current_user)  # 인증 의존성 추가
 ):
     """
     여러 오디오 파일과 프레임을 한 번에 업로드하여 배치 분석을 수행합니다.
@@ -90,12 +149,13 @@ async def bomatic_analyze(
                 'content_type': audio.content_type
             })
         
-        # pipeline_service를 통해 배치 분석 작업 시작
+        # pipeline_service를 통해 배치 분석 작업 시작 (사용자 ID 포함)
         job_id = await pipeline_service.start_batch_analysis(
             frame_content, 
             audio_contents,  # UploadFile 대신 내용을 전달
             mapping_dict,
-            template_type
+            template_type,
+            user_id=current_user.get("user_id")  # 사용자 ID 추가
         )
         
         return BatchAnalysisResponse(
@@ -110,10 +170,16 @@ async def bomatic_analyze(
 
 
 @router.get("/batch-status/{job_id}", response_model=BatchAnalysisResponse)
-async def get_batch_status(job_id: str):
+async def get_batch_status(
+    job_id: str,
+    current_user = Depends(get_current_user)  # 인증 의존성 추가
+):
     """배치 분석 작업 상태를 확인합니다."""
     try:
-        job_info = await pipeline_service.get_batch_status(job_id)
+        job_info = await pipeline_service.get_batch_status(
+            job_id, 
+            user_id=current_user.get("user_id")  # 사용자 소유권 확인
+        )
         
         return BatchAnalysisResponse(
             status=job_info["status"],
@@ -129,7 +195,11 @@ async def get_batch_status(job_id: str):
 
 
 @router.post("/download/{job_id}")
-async def download_analysis_result(job_id: str, frame: UploadFile = File(...)):
+async def download_analysis_result(
+    job_id: str, 
+    frame: UploadFile = File(...),
+    current_user = Depends(get_current_user)  # 인증 의존성 추가
+):
     """
     사용자로부터 DOCX 템플릿 파일을 받아, 분석 결과를 채워 다운로드합니다.
     """
@@ -138,7 +208,10 @@ async def download_analysis_result(job_id: str, frame: UploadFile = File(...)):
         if not frame.filename.endswith('.docx'):
             raise HTTPException(status_code=400, detail="Invalid file type. Please upload a .docx file.")
 
-        job_info = await pipeline_service.get_batch_results(job_id)
+        job_info = await pipeline_service.get_batch_results(
+            job_id,
+            user_id=current_user.get("user_id")  # 사용자 소유권 확인
+        )
         parsed_job_info = replace_analysis_with_parsed(job_info)
 
         frame_docx_bytes = await frame.read()
@@ -166,7 +239,8 @@ async def download_analysis_result(job_id: str, frame: UploadFile = File(...)):
 @router.post("/download-test")
 async def download_analysis_result_direct(
     frame: UploadFile = File(...),
-    json_file: UploadFile = File(...)
+    json_file: UploadFile = File(...),
+    current_user = Depends(get_current_user)  # 인증 의존성 추가
 ):
     """
     (임시) 사용자로부터 DOCX 템플릿 파일과 job_info JSON 파일을 직접 받아

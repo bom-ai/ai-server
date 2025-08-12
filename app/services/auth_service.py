@@ -146,3 +146,6 @@ class AuthService:
             db.commit()
             db.refresh(user)
         return user
+
+
+auth_service = AuthService()
