@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     stt_max_attempts: int = 150
     stt_poll_interval: int = 2
     
+    # Google Cloud Storage 설정
+    gcs_bucket_name: Optional[str] = os.getenv("GCS_BUCKET_NAME", "bomatic_audios")
+    google_application_credentials: Optional[str] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

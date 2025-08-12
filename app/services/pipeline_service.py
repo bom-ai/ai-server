@@ -4,10 +4,11 @@
 import asyncio
 import uuid
 from typing import Dict, Any, List, Optional, Literal
-from fastapi import UploadFile
+from google.cloud import storage
 
 from app.services.stt_service import stt_service
 from app.services.gemini_service import gemini_service
+from app.core.config import settings
 from app.utils.docx_processor import (
     extract_text_with_separated_tables, 
     extract_table_headers_with_subitems,
@@ -23,6 +24,47 @@ class PipelineService:
         self.gemini_service = gemini_service
         # 배치 작업 저장소
         self.batch_jobs = {}
+        # Cloud Storage 클라이언트 초기화
+        self.storage_client = storage.Client()
+        # 버킷 이름 설정에서 가져오기
+        self.bucket_name = settings.gcs_bucket_name
+    
+    async def _cleanup_cloud_storage_file(self, audio_url: str):
+        """Cloud Storage에서 임시 파일을 삭제합니다."""
+        try:
+            # URL에서 blob 이름 추출
+            blob_name = audio_url.split(f'/{self.bucket_name}/')[1]
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            blob.delete()
+        except Exception as e:
+            # 파일 삭제 실패는 치명적이지 않으므로 로그만 남김
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Cloud Storage 파일 삭제 실패: {str(e)}")
+    
+    async def _upload_to_cloud_storage(self, audio_content: bytes, filename: str) -> str:
+        """오디오 파일을 Cloud Storage에 업로드하고 공개 URL을 반환합니다."""
+        try:
+            # 임시 파일 경로 생성
+            unique_filename = f"{uuid.uuid4()}_{filename}"
+            blob_name = f"audio/{unique_filename}"
+            
+            # Cloud Storage에 업로드
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            
+            # 파일 업로드
+            blob.upload_from_string(audio_content)
+            
+            # 공개 읽기 권한 설정
+            blob.make_public()
+            
+            # 공개 URL 반환
+            return blob.public_url
+            
+        except Exception as e:
+            raise Exception(f"Cloud Storage 업로드 실패: {str(e)}")
     
     async def start_batch_analysis(
         self,
@@ -116,10 +158,15 @@ class PipelineService:
                 logger.info(f"Job {job_id}: Processing file {i+1}/{len(audio_contents)}: {filename}")
                 
                 try:
-                    # 2. STT 처리 - 파일 내용으로 처리
+                    # 2. 오디오 파일을 Cloud Storage에 업로드
+                    logger.info(f"Job {job_id}: Uploading {filename} to Cloud Storage")
+                    audio_url = await self._upload_to_cloud_storage(audio_content, filename)
+                    logger.info(f"Job {job_id}: Successfully uploaded {filename} to Cloud Storage: {audio_url}")
+                    
+                    # 3. STT 처리 - Cloud Storage URL 사용
                     logger.info(f"Job {job_id}: Starting STT for {filename}")
-                    stt_result = await self.stt_service.request_stt_with_file_content(
-                        audio_content, filename
+                    stt_result = await self.stt_service.request_stt_with_audio_url(
+                        audio_url
                     )
                     rid = stt_result.get("rid")
                     logger.info(f"Job {job_id}: STT request ID for {filename}: {rid}")
@@ -136,7 +183,7 @@ class PipelineService:
                             logger.info(f"Job {job_id}: Waiting {wait_time} seconds before Gemini API call to prevent rate limiting")
                             await asyncio.sleep(wait_time)
                         
-                        # 3. Gemini API를 통한 내용 분석
+                        # 4. Gemini API를 통한 내용 분석
                         logger.info(f"Job {job_id}: Starting Gemini analysis for {filename}")
                         analysis_result = await self.gemini_service.analyze_text(
                             text_content=transcribed_text,
@@ -147,6 +194,7 @@ class PipelineService:
                         
                         self.batch_jobs[job_id]["results"][filename] = {
                             "group": group_name,
+                            "audio_url": audio_url,  # Cloud Storage URL 포함
                             "transcribed_text": transcribed_text,
                             "analysis": analysis_result
                         }
@@ -170,9 +218,17 @@ class PipelineService:
             self.batch_jobs[job_id]["status"] = "completed"
             self.batch_jobs[job_id]["message"] = "배치 분석 작업이 완료되었습니다."
             
+            # Cloud Storage 임시 파일 정리
+            logger.info(f"Job {job_id}: Starting cleanup of Cloud Storage files")
+            for filename, result in self.batch_jobs[job_id]["results"].items():
+                if "audio_url" in result:
+                    await self._cleanup_cloud_storage_file(result["audio_url"])
+            logger.info(f"Job {job_id}: Cloud Storage cleanup completed")
+            
         except Exception as e:
             self.batch_jobs[job_id]["status"] = "failed"
             self.batch_jobs[job_id]["message"] = f"배치 분석 중 오류 발생: {str(e)}"
+            logger.error(f"Job {job_id}: Batch analysis failed: {str(e)}", exc_info=True)
 
 
 # bo:matic 파이프라인 서비스 인스턴스
