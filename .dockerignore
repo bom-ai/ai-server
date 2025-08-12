@@ -1,0 +1,82 @@
+# Python 관련
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 가상환경
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# 테스트 및 로그
+*.log
+.coverage
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+
+# 데이터베이스 파일 (로컬 개발용)
+*.db
+*.sqlite
+*.sqlite3
+
+# 문서 파일
+README.md
+*.md
+docs/
+
+# 개발/테스트 파일
+test_*.py
+*_test.py
+test/
+tests/
+
+# 기타
+.dockerignore
+Dockerfile
+docker-compose.yml
+*.yml
+*.yaml
