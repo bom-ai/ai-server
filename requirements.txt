@@ -26,6 +26,7 @@ grpcio==1.73.1
 grpcio-status==1.62.3
 h11==0.16.0
 httplib2==0.22.0
+httpx==0.28.1
 idna==3.10
 numpy==2.2.6
 oauthlib==3.3.1
@@ -43,6 +44,7 @@ PyJWT==2.8.0
 PyMySQL==1.1.0
 pyparsing==3.2.3
 python-dateutil==2.9.0.post0
+python-docx==1.1.2
 python-dotenv==1.0.0
 python-multipart==0.0.6
 pytz==2025.2
@@ -60,4 +62,4 @@ tzdata==2025.2
 uritemplate==4.2.0
 urllib3==2.5.0
 uvicorn==0.35.0
-python-docx==1.1.2
+
