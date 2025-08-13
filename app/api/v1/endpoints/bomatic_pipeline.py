@@ -2,9 +2,10 @@
 전체 파이프라인 API 엔드포인트
 """
 import json
-from typing import List, Literal
+from typing import List, Literal, Dict
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response, Query, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.models.schemas import BatchAnalysisResponse, FileMappingValidation
@@ -73,6 +74,73 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+
+@router.post("/request-analysis")
+async def request_analysis(
+    # 각 필드를 개별 Form 데이터로 받습니다.
+    filenames: List[str] = Form(..., description="업로드할 오디오 파일명 목록"),
+    mapping: str = Form(..., description="{'파일명': '그룹명'} 형태의 JSON 문자열"),
+    template_type: str = Form("refined", description="분석 템플릿 타입 ('raw' 또는 'refined')"),
+    frame: UploadFile = File(..., description="분석 프레임 (.docx 파일)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    배치 분석 작업을 요청하고, 파일들을 직접 업로드할 서명된 URL들을 발급받습니다.
+    (Pydantic 모델을 사용하지 않는 버전)
+    """
+    # 1. 입력 값 유효성 검사
+    if not frame.filename or not frame.filename.lower().endswith('.docx'):
+        raise HTTPException(status_code=400, detail="프레임 파일은 .docx 형식이어야 합니다.")
+
+    if template_type not in ["raw", "refined"]:
+        raise HTTPException(status_code=400, detail="template_type은 'raw' 또는 'refined'만 가능합니다.")
+
+    try:
+        mapping_dict = json.loads(mapping)
+        if not isinstance(mapping_dict, dict):
+            raise ValueError("매핑 데이터는 딕셔너리(JSON 객체) 형태여야 합니다.")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="매핑(mapping) 데이터가 올바른 JSON 형식이 아닙니다.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        frame_content = await frame.read()
+
+        result = await pipeline_service.request_batch_analysis_job(
+            frame_content=frame_content,
+            filenames=filenames,
+            mapping=mapping_dict,
+            template_type=template_type,
+            user_id=current_user.get("user_id")
+        )
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"서버 내부 오류가 발생했습니다: {e}")
+
+@router.post("/start-analysis/{job_id}", response_model=BatchAnalysisResponse)
+async def start_analysis(
+    job_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    클라이언트가 GCS로 파일 업로드를 완료한 후, 실제 분석 작업을 시작하도록 지시합니다.
+    """
+    try:
+        await pipeline_service.start_batch_analysis(job_id, user_id=current_user.get("user_id"))
+        job_info = await pipeline_service.get_batch_status(job_id)
+
+        return BatchAnalysisResponse(
+            status=job_info["status"],
+            message="배치 분석 작업이 시작되었습니다.",
+            job_id=job_id,
+            total_files=job_info["total_files"]
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/analyze", response_model=BatchAnalysisResponse)
 async def bomatic_analyze(
@@ -178,7 +246,6 @@ async def get_batch_status(
     try:
         job_info = await pipeline_service.get_batch_status(
             job_id, 
-            user_id=current_user.get("user_id")  # 사용자 소유권 확인
         )
         
         return BatchAnalysisResponse(
@@ -235,57 +302,3 @@ async def download_analysis_result(
         # 업로드된 파일의 임시 리소스를 닫아줍니다.
         await frame.close()
 
-
-@router.post("/download-test")
-async def download_analysis_result_direct(
-    frame: UploadFile = File(...),
-    json_file: UploadFile = File(...),
-    current_user = Depends(get_current_user)  # 인증 의존성 추가
-):
-    """
-    (임시) 사용자로부터 DOCX 템플릿 파일과 job_info JSON 파일을 직접 받아
-    분석 결과를 채워 다운로드합니다.
-    """
-    # 1. 파일 형식 확인
-    if not frame.filename.endswith('.docx'):
-        raise HTTPException(status_code=400, detail="The 'frame' file must be a .docx file.")
-    if not json_file.filename.endswith('.json'):
-        raise HTTPException(status_code=400, detail="The 'json_file' must be a .json file.")
-
-    json_content = None
-    try:
-        # 2. 업로드된 JSON 파일의 내용을 읽고 파싱
-        json_content = await json_file.read()
-        job_info = json.loads(json_content)
-
-        # 3. 기존 로직 재사용
-        parsed_job_info = replace_analysis_with_parsed(job_info)
-
-        frame_docx_bytes = await frame.read()
-
-        modified_docx_bytes = fill_frame_with_analysis_bytes(
-            json_data=parsed_job_info,
-            frame_docx_bytes=frame_docx_bytes
-        )
-
-        # 4. 파일 다운로드 응답 생성
-        file_name = "direct_analysis_result.docx"
-        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        headers = {
-            "Content-Disposition": f'attachment; filename="{file_name}"'
-        }
-
-        return Response(content=modified_docx_bytes, media_type=media_type, headers=headers)
-
-    except json.JSONDecodeError:
-        # json_content가 있을 경우 디버깅을 위해 출력
-        error_detail = "Invalid JSON format in 'json_file'."
-        if json_content:
-            error_detail += f" Content: {json_content[:200].decode(errors='ignore')}"
-        raise HTTPException(status_code=400, detail=error_detail)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
-    finally:
-        # 5. 업로드된 두 파일의 임시 리소스를 모두 닫아줍니다.
-        await frame.close()
-        await json_file.close()
