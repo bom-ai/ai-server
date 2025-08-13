@@ -16,10 +16,14 @@ class EmailService:
     def send_verification_email(email: str, verification_token: str) -> bool:
         """인증 이메일 전송"""
         try:
+            # 기본 도메인 설정 (설정값이 없으면 localhost 사용)
+            base_url = getattr(settings, 'base_url', 'http://localhost:8000')
+            verification_link = f"{base_url}/api/auth/verify?token={verification_token}"
+
             # 이메일 설정이 없으면 콘솔에 출력만 하고 성공으로 처리
             if not all([settings.mail_server, settings.mail_username, settings.mail_password]):
                 print(f"[EMAIL DEBUG] Verification email for {email}")
-                print(f"[EMAIL DEBUG] Verification link: http://localhost:8000/api/auth/verify?token={verification_token}")
+                print(f"[EMAIL DEBUG] Verification link: {verification_link}")
                 return True
             
             # 실제 이메일 전송
@@ -34,7 +38,7 @@ class EmailService:
             
             아래 링크를 클릭하여 이메일 인증을 완료해주세요:
             
-            http://localhost:8000/api/auth/verify?token={verification_token}
+            {verification_link}
             
             감사합니다.
             """

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = True
+    base_url: str = os.getenv("BASE_URL")
     
     # CORS 설정
     cors_origins: list = ["*"]
@@ -32,13 +33,13 @@ class Settings(BaseSettings):
     daglo_api_key: Optional[str] = os.getenv("DAGLO_API_KEY")
     
     # JWT 설정
-    secret_key: str = os.getenv("SECRET_KEY", "temporary-secret-key-for-development")
+    secret_key: str = os.getenv("SECRET_KEY")
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60  # 1시간
     refresh_token_expire_days: int = 7     # 7일
     
     # 데이터베이스 설정
-    database_url: Optional[str] = os.getenv("DATABASE_URL", "sqlite:///./bo_matic.db")
+    database_url: Optional[str] = os.getenv("DATABASE_URL")
     
     # 이메일 설정
     mail_server: Optional[str] = os.getenv("MAIL_SERVER")
