@@ -45,7 +45,61 @@ class PipelineService:
             content_type="application/octet-stream", 
         )
         return url
-    
+
+    def check_file_exists(self, blob_name: str) -> bool:
+        """GCS에 파일이 존재하는지 확인합니다."""
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            exists = blob.exists()
+            print(f"파일 존재 확인 - {blob_name}: {exists}")
+            return exists
+        except Exception as e:
+            print(f"파일 존재 확인 중 오류: {e}")
+            return False
+
+    def list_files_in_path(self, path_prefix: str) -> List[str]:
+        """특정 경로의 모든 파일 목록을 반환합니다."""
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blobs = bucket.list_blobs(prefix=path_prefix)
+            file_list = [blob.name for blob in blobs]
+            print(f"경로 '{path_prefix}'의 파일 목록: {file_list}")
+            return file_list
+        except Exception as e:
+            print(f"파일 목록 조회 중 오류: {e}")
+            return []
+
+    def generate_read_signed_url(self, blob_name: str, expiration_minutes: int = 60) -> str:
+        """읽기용 서명된 URL을 생성합니다."""
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+
+            # 파일 존재 여부 확인
+            if not self.check_file_exists(blob_name):
+                print(f"파일이 존재하지 않습니다: {blob_name}")
+                
+                # 해당 경로의 모든 파일 목록 출력
+                path_parts = blob_name.split('/')
+                if len(path_parts) >= 3:
+                    path_prefix = '/'.join(path_parts[:-1])  # 마지막 파일명 제외
+                    self.list_files_in_path(path_prefix)
+                
+                return None
+
+            # 읽기용 서명된 URL (GET 방식)
+            url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(minutes=expiration_minutes),
+                method="GET"
+            )
+            print(f"서명된 url(읽기 전용 for 다글로): {url}")
+            return url
+        except Exception as e:
+            print(f"읽기용 URL 생성 중 오류 발생: {e}")
+            return None
+
     async def request_batch_analysis_job(
         self,
         frame_content: bytes,
@@ -136,21 +190,26 @@ class PipelineService:
                 logger.info(f"Job {job_id}: Processing file {i+1}/{len(filenames_to_process)}: {filename}")
                 
                 try:
-                    ## CHANGED: GCS URI를 직접 사용 (업로드 과정 삭제)
-                    # GCS URI 형식: gs://<bucket_name>/<object_name>
-                    audio_uri = f"gs://{self.bucket_name}/{object_name}"
+                    # 읽기용 서명된 URL 생성
+                    logger.info(f"읽기용 서명된 URL 생성: {filename}")
+                    audio_url = self.generate_read_signed_url(object_name, expiration_minutes=20)
                     
-                    # STT 처리 - GCS URI 사용
-                    logger.info(f"Job {job_id}: Starting STT for {audio_uri}")
-                    stt_result = await self.stt_service.request_stt_with_audio_url(audio_uri)
+                    if not audio_url:
+                        raise Exception("읽기용 URL 생성에 실패했습니다.")
+                    
+                    # STT 처리
+                    logger.info(f"Job {job_id}: Starting STT for {filename} via URL")
+                    stt_result = await self.stt_service.request_stt_with_audio_url(audio_url)
                     rid = stt_result.get("rid")
+                    print(f"다글로 API Call rid: {rid}")
                     
                     if rid:
                         transcribed_text = await self.stt_service.wait_for_completion(rid)
                         logger.info(f"Job {job_id}: STT completed for {filename}")
                         
-                        # (필요 시 Rate Limiting 대기 시간 추가)
-                        if i > 0: await asyncio.sleep(min(5, i * 2))
+                        # Rate Limiting 대기 시간
+                        if i > 0: 
+                            await asyncio.sleep(min(5, i * 2))
                         
                         # Gemini 분석
                         analysis_result = await self.gemini_service.analyze_text(
@@ -161,10 +220,10 @@ class PipelineService:
                         
                         job_info["results"][filename] = {
                             "group": group_name,
-                            "gcs_uri": audio_uri, # GCS URI 저장
                             "transcribed_text": transcribed_text,
                             "analysis": analysis_result
                         }
+                        
                     else:
                         raise Exception("STT 요청 ID를 받지 못했습니다.")
 
@@ -188,6 +247,7 @@ class PipelineService:
         if job_id not in self.batch_jobs:
             raise ValueError("해당 작업을 찾을 수 없습니다.")
         
+        print(self.batch_jobs[job_id]["message"])
         return self.batch_jobs[job_id]
     
     async def get_batch_results(self, job_id: str) -> Dict[str, Any]:
