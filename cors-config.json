@@ -1,7 +1,7 @@
 [
   {
-    "origin": ["http://localhost:5173"],
-    "method": ["PUT", "POST", "GET"],
+    "origin": ["https://bomatic.vercel.app", "http://localhost:5173"],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
     "responseHeader": ["Content-Type", "Authorization"],
     "maxAgeSeconds": 3600
   }
