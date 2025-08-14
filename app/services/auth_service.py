@@ -5,17 +5,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import jwt
 from jwt import PyJWTError
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.core.config import get_settings
 from app.models.database import User, RefreshToken
 import secrets
+import bcrypt
 
 settings = get_settings()
 
-# 비밀번호 해시화 설정
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class AuthService:
     """인증 서비스 클래스"""
@@ -23,12 +21,25 @@ class AuthService:
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
         """비밀번호 검증"""
-        return pwd_context.verify(plain_password, hashed_password)
+        password_byte_enc = plain_password.encode('utf-8')
+        
+        # hashed_password가 문자열인 경우 bytes로 변환
+        if isinstance(hashed_password, str):
+            hashed_password = hashed_password.encode('utf-8')
+        
+        return bcrypt.checkpw(password=password_byte_enc, hashed_password=hashed_password)
     
     @staticmethod
     def get_password_hash(password: str) -> str:
         """비밀번호 해시화"""
-        return pwd_context.hash(password)
+        pwd_bytes = password.encode('utf-8')
+        salt = bcrypt.gensalt()
+        hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
+        
+        # 데이터베이스에 저장하기 위해 문자열로 변환하여 반환
+        print(hashed_password)
+        print(hashed_password.decode('utf-8'))
+        return hashed_password.decode('utf-8')
     
     @staticmethod
     def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

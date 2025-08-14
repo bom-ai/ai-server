@@ -2,8 +2,7 @@
 Gemini AI 서비스
 """
 import asyncio
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google import genai
 from fastapi import HTTPException
 from typing import List, Optional, Literal
 
@@ -16,15 +15,30 @@ class GeminiService:
     
     def __init__(self):
         self.api_key = settings.gemini_api_key
+        self._client = None
         self._initialized = False
+        
+        # 모델 우선순위 리스트 (높은 성능 -> 낮은 성능 순)
+        self.model_fallback_chain = [
+            "models/gemini-2.5-pro",
+            "models/gemini-2.5-flash", 
+            "models/gemini-1.5-pro"
+        ]
+        
+        # 모델별 성공률 추적
+        self.model_stats = {
+            "models/gemini-2.5-pro": {"attempts": 0, "successes": 0},
+            "models/gemini-2.5-flash": {"attempts": 0, "successes": 0},
+            "models/gemini-1.5-pro": {"attempts": 0, "successes": 0}
+        }
     
-    def _initialize(self) -> bool:  # 클래스 내부 전용 Private 메서드 (호출은 가능하지만 _ 붙인 건 관례상 내부에서만!)
+    def _initialize(self) -> bool:
         """Gemini API를 초기화합니다."""
         if not self.api_key:
             return False
         
         try:
-            genai.configure(api_key=self.api_key)
+            self._client = genai.Client(api_key=self.api_key)
             self._initialized = True
             return True
         except Exception:
@@ -46,21 +60,69 @@ class GeminiService:
                 detail="Gemini API 키가 설정되지 않았습니다."
             )
         
-        max_retries = 3
-        base_retry_delay = 5
+        # 각 모델을 순차적으로 시도
+        for model_index, model_name in enumerate(self.model_fallback_chain):
+            try:
+                logger.info(f"Trying model: {model_name} (attempt {model_index + 1}/{len(self.model_fallback_chain)})")
+                print(f"Trying model: {model_name} (attempt {model_index + 1}/{len(self.model_fallback_chain)})")
+                
+                result = await self._try_model_analysis(
+                    model_name=model_name,
+                    text_content=text_content,
+                    custom_items=custom_items,
+                    template_type=template_type,
+                    logger=logger
+                )
+                
+                if result:
+                    logger.info(f"Successfully analyzed with model: {model_name}")
+                    return result
+                    
+            except Exception as e:
+                logger.error(f"Model {model_name} failed: {str(e)}")
+                
+                # 마지막 모델도 실패한 경우
+                if model_index == len(self.model_fallback_chain) - 1:
+                    logger.error("All models failed, returning fallback response")
+                    return self._generate_fallback_response(custom_items, str(e))
+                
+                # 다음 모델 시도 전 대기
+                await asyncio.sleep(2)
+                continue
+        
+        # 모든 모델 실패 시 fallback
+        return self._generate_fallback_response(custom_items, "All models exhausted")
+
+    async def _try_model_analysis(
+        self,
+        model_name: str,
+        text_content: str,
+        custom_items: Optional[List[str]],
+        template_type: str,
+        logger,
+        max_retries: int = 2
+    ) -> Optional[str]:
+        """특정 모델로 분석을 시도합니다."""
+        
+        # 모델별 설정 조정
+        model_config = self._get_model_config(model_name)
         
         # 안전 설정을 최대한 완화
-        safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY: HarmBlockThreshold.BLOCK_NONE,
-        }
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_CIVIC_INTEGRITY", "threshold": "BLOCK_NONE"}
+        ]
+        
+        # 시도 횟수 기록
+        if model_name in self.model_stats:
+            self.model_stats[model_name]["attempts"] += 1
         
         for attempt in range(max_retries):
             try:
-                logger.info(f"Gemini API call attempt {attempt + 1}/{max_retries}")
+                logger.info(f"Model {model_name} attempt {attempt + 1}/{max_retries}")
                 
                 # custom_items를 기반으로 시스템 프롬프트 생성
                 system_prompt = generate_system_prompt_from_docx(
@@ -68,66 +130,124 @@ class GeminiService:
                     template_type=template_type
                 )
                 
-                model = genai.GenerativeModel(
-                    model_name='gemini-2.5-pro',
-                    system_instruction=system_prompt
-                )
-                
-                logger.info(f"Generating content with text length: {len(text_content)}")
-                
-                # 안전 설정과 함께 요청
-                response = model.generate_content(
-                    text_content,
-                    safety_settings=safety_settings
+                # API 호출
+                response = await self._client.aio.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        {"role": "model", "parts": [{"text": system_prompt}]},
+                        {"role": "user", "parts": [{"text": text_content}]}
+                    ],
+                    config={
+                        "safety_settings": safety_settings,
+                        **model_config
+                    }
                 )
                 
                 # 응답 검증
-                if response.candidates and response.candidates[0].content.parts:
-                    logger.info(f"Gemini API call successful on attempt {attempt + 1}")
-                    return response.text
-                else:
-                    # finish_reason 확인
-                    finish_reason = response.candidates[0].finish_reason if response.candidates else "UNKNOWN"
-                    logger.warning(f"No valid response parts. Finish reason: {finish_reason}")
+                if response.candidates and len(response.candidates) > 0:
+                    candidate = response.candidates[0]
+                    finish_reason = candidate.finish_reason if hasattr(candidate, 'finish_reason') else "UNKNOWN"
                     
-                    # 안전 필터링인 경우 특별 처리
-                    if finish_reason == 1:  # SAFETY
-                        logger.warning("Content blocked by safety filter. Trying with modified prompt...")
-                        # 다음 시도에서 사용할 대체 프롬프트나 전처리 로직 추가 가능
-                        raise Exception(f"Content blocked by safety filter (finish_reason: {finish_reason})")
-                    else:
-                        raise Exception(f"Invalid response format (finish_reason: {finish_reason})")
-                
-            except Exception as e:
-                logger.error(f"Gemini API call failed on attempt {attempt + 1}: {str(e)}")
-                
-                # Rate limiting 관련 에러인지 확인
-                if "quota" in str(e).lower() or "rate" in str(e).lower() or "limit" in str(e).lower() or "429" in str(e):
-                    if attempt < max_retries - 1:
-                        wait_time = 10 + (base_retry_delay * (2 ** attempt))
-                        logger.info(f"Rate limiting detected, waiting {wait_time} seconds before retry")
-                        await asyncio.sleep(wait_time)
-                        continue
-                
-                # 안전 필터링인 경우
-                elif "safety" in str(e).lower() or "finish_reason" in str(e).lower():
-                    if attempt < max_retries - 1:
-                        wait_time = base_retry_delay
-                        logger.info(f"Safety filter detected, waiting {wait_time} seconds before retry")
-                        await asyncio.sleep(wait_time)
-                        continue
-                
-                # 마지막 시도였거나 다른 에러인 경우
-                if attempt == max_retries - 1:
-                    raise HTTPException(
-                        status_code=500, 
-                        detail=f"Gemini 분석 실패 (모든 재시도 실패): {str(e)}"
-                    )
+                    logger.info(f"Model {model_name} finish_reason: {finish_reason}")
+                    
+                    # 성공적인 응답 처리
+                    if finish_reason in ["STOP", "MAX_TOKENS"]:
+                        if (candidate.content and 
+                            candidate.content.parts and 
+                            len(candidate.content.parts) > 0 and
+                            candidate.content.parts[0].text):
+                            
+                            result_text = candidate.content.parts[0].text.strip()
+                            if result_text:
+                                logger.info(f"Model {model_name} successful response")
+                                
+                                # 성공 시 기록
+                                if model_name in self.model_stats:
+                                    self.model_stats[model_name]["successes"] += 1
+                                
+                                return result_text
+                    
+                    # STOP 에러나 기타 문제인 경우 다음 시도
+                    logger.warning(f"Model {model_name} finish_reason: {finish_reason}, trying next attempt or model")
+                    print(f"Model {model_name} finish_reason: {finish_reason}, trying next attempt or model")
+                    
+                    # STOP 에러가 반복되면 다음 모델로
+                    if finish_reason == "STOP" and attempt == max_retries - 1:
+                        raise Exception(f"Model {model_name} consistently returning STOP without content")
+                        
                 else:
-                    wait_time = base_retry_delay * (attempt + 1)
-                    logger.info(f"General error, waiting {wait_time} seconds before retry")
-                    await asyncio.sleep(wait_time)
-                    continue
+                    logger.warning(f"Model {model_name} returned no candidates")
+                
+                # 재시도 전 대기
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(3)
+                    
+            except Exception as e:
+                logger.error(f"Model {model_name} attempt {attempt + 1} failed: {str(e)}")
+                
+                # Rate limiting인 경우 더 오래 대기
+                if "quota" in str(e).lower() or "rate" in str(e).lower() or "429" in str(e):
+                    if attempt < max_retries - 1:
+                        wait_time = 10 * (attempt + 1)
+                        logger.info(f"Rate limiting for {model_name}, waiting {wait_time}s")
+                        await asyncio.sleep(wait_time)
+                        continue
+                
+                # 마지막 시도인 경우 예외 발생
+                if attempt == max_retries - 1:
+                    raise
+                
+                await asyncio.sleep(2)
+        
+        return None
+
+    def _get_model_config(self, model_name: str) -> dict:
+        """모델별 최적화된 설정을 반환합니다."""
+        base_config = {
+            "temperature": 0.1,
+            "max_output_tokens": 65535,
+        }
+        if "gemini-2.5-pro" in model_name:
+            return {
+                "temperature": 0.1,
+                "max_output_tokens": 65535,
+            }
+        elif "gemini-2.5-flash" in model_name:
+            return {
+                "temperature": 0.1,
+                "max_output_tokens": 65535,
+            }
+        elif "gemini-1.5-pro" in model_name:
+            return {
+                "temperature": 0.1,
+                "max_output_tokens": 8192,
+            }
+        
+        return base_config
+
+    def _generate_fallback_response(self, custom_items: Optional[List[str]], error_msg: str) -> str:
+        """모든 모델이 실패했을 때 fallback 응답을 생성합니다."""
+        items_text = ""
+        if custom_items:
+            items_text = f"\n\n요청된 분석 항목:\n" + "\n".join([f"- {item}" for item in custom_items[:10]])
+        
+        return f"""
+            [자동 분석 제한됨]
+            죄송합니다. 현재 AI 분석 서비스에 일시적인 문제가 발생했습니다.
+
+            상황 정보:
+            - 여러 AI 모델을 시도했으나 모두 실패
+            - 마지막 오류: {error_msg}
+            - 음성 인식은 정상적으로 완료됨
+
+            권장사항:
+            1. 잠시 후 다시 시도해주세요
+            2. 음성 내용을 수동으로 검토하세요
+            3. 필요시 고객 지원팀에 문의하세요 
+            {items_text}
+
+            이 문제는 일시적이며, 시스템이 곧 정상화될 예정입니다.
+            """
 
 
 # 전역 Gemini 서비스 인스턴스
