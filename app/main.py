@@ -27,7 +27,7 @@ def create_application() -> FastAPI:
 
     origins = [
         "https://bomatic.vercel.app",      # 배포된 프론트엔드 주소
-        "http://localhost:3000",         # 로컬에서 개발할 때 사용하는 주소
+        "http://localhost:5173",         # 로컬에서 개발할 때 사용하는 주소
         # 필요하다면 다른 주소도 추가
     ]
     
