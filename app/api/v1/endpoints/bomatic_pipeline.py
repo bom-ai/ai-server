@@ -277,7 +277,6 @@ async def download_analysis_result(
 
         job_info = await pipeline_service.get_batch_results(
             job_id,
-            user_id=current_user.get("user_id")  # 사용자 소유권 확인
         )
         parsed_job_info = replace_analysis_with_parsed(job_info)
 

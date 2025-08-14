@@ -92,41 +92,53 @@ class STTService:
         language: str = "ko", 
         enable_speaker_diarization: bool = True
     ) -> Dict[str, Any]:
-        """Daglo STT API에 음성 변환 요청을 보냅니다."""
+        """Daglo STT API에 음성 변환 요청을 보냅니다. (비동기 httpx 사용)"""
         if not self.api_key:
             raise HTTPException(
                 status_code=500, 
                 detail="DAGLO API 키가 설정되지 않았습니다."
             )
         
-        try:
-            response = requests.post(
-                self.base_url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "audio": {
-                        "source": {
-                            "url": audio_url
+        # httpx.AsyncClient를 사용하여 비동기 요청을 보냅니다.
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    self.base_url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "audio": {
+                            "source": {
+                                "url": audio_url
+                            }
+                        },
+                        "language": language,
+                        "sttConfig": {
+                            "speakerDiarization": {
+                                "enable": enable_speaker_diarization
+                            }
                         }
                     },
-                    "language": language,
-                    "sttConfig": {
-                        "speakerDiarization": {
-                            "enable": enable_speaker_diarization
-                        }
-                    }
-                }
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"다글로 STT 요청 실패: {str(e)}"
-            )
+                    # 타임아웃을 설정하여 무한정 기다리는 것을 방지합니다. (예: 30초)
+                    timeout=30.0 
+                )
+                response.raise_for_status()  # 2xx 이외의 상태 코드일 경우 예외 발생
+                return response.json()
+            
+            # httpx에서 발생하는 네트워크 관련 예외를 구체적으로 처리하는 것이 좋습니다.
+            except httpx.RequestError as e:
+                raise HTTPException(
+                    status_code=503, 
+                    detail=f"다글로 STT 서비스에 연결할 수 없습니다: {e}"
+                )
+            except Exception as e:
+                # 그 외의 예외 처리
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"다글로 STT 요청 중 알 수 없는 오류 발생: {str(e)}"
+                )
 
 
     async def request_stt_with_file_content(
