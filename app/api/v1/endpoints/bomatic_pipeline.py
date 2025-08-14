@@ -278,6 +278,7 @@ async def download_analysis_result(
         job_info = await pipeline_service.get_batch_results(
             job_id,
         )
+        
         parsed_job_info = replace_analysis_with_parsed(job_info)
 
         frame_docx_bytes = await frame.read()

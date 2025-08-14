@@ -24,11 +24,17 @@ def create_application() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc"
     )
+
+    origins = [
+        "https://bomatic.vercel.app",      # 배포된 프론트엔드 주소
+        "http://localhost:3000",         # 로컬에서 개발할 때 사용하는 주소
+        # 필요하다면 다른 주소도 추가
+    ]
     
     # CORS 미들웨어 설정
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
