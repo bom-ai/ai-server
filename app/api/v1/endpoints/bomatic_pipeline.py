@@ -265,7 +265,6 @@ async def get_batch_status(
 async def download_analysis_result(
     job_id: str, 
     frame: UploadFile = File(...),
-    current_user = Depends(get_current_user)  # 인증 의존성 추가
 ):
     """
     사용자로부터 DOCX 템플릿 파일을 받아, 분석 결과를 채워 다운로드합니다.
