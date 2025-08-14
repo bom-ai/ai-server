@@ -2,13 +2,12 @@
 User Authentication 관련 서비스
 """
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 import jwt
 from jwt import PyJWTError
-from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.core.config import get_settings
-from app.models.database import User, RefreshToken
+from app.models.datastore import user_entity, refresh_token_entity
 import secrets
 import bcrypt
 
@@ -37,8 +36,6 @@ class AuthService:
         hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
         
         # 데이터베이스에 저장하기 위해 문자열로 변환하여 반환
-        print(hashed_password)
-        print(hashed_password.decode('utf-8'))
         return hashed_password.decode('utf-8')
     
     @staticmethod
@@ -80,83 +77,51 @@ class AuthService:
             )
     
     @staticmethod
-    def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         """이메일로 사용자 조회"""
-        return db.query(User).filter(User.email == email).first()
+        user = user_entity.get_user_by_email(email)
+        return user  
     
     @staticmethod
-    def create_user(db: Session, email: str, password: str) -> User:
+    def create_user(email: str, password: str) -> Dict[str, Any]:
         """사용자 생성"""
         hashed_password = AuthService.get_password_hash(password)
-        db_user = User(
-            email=email,
-            hashed_password=hashed_password,
-            is_active=False,  # 이메일 인증 후 활성화
-            is_verified=False
-        )
-        db.add(db_user)
-        db.commit()
-        db.refresh(db_user)
-        return db_user
+        user = user_entity.create_user(email, hashed_password)
+        return user  
     
     @staticmethod
-    def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
+    def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
         """사용자 인증"""
-        user = AuthService.get_user_by_email(db, email)
+        user = AuthService.get_user_by_email(email)
         if not user:
             return None
-        if not AuthService.verify_password(password, user.hashed_password):
+        if not AuthService.verify_password(password, user['hashed_password']):
             return None
         return user
     
     @staticmethod
-    def store_refresh_token(db: Session, user_id: int, token: str) -> RefreshToken:
+    def store_refresh_token(user_email: str, token: str) -> Dict[str, Any]:
         """리프레시 토큰 저장"""
         expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
-        
-        # 기존 토큰들을 모두 무효화
-        db.query(RefreshToken).filter(RefreshToken.user_id == user_id).update(
-            {"is_revoked": True}
-        )
-        
-        db_token = RefreshToken(
-            token=token,
-            user_id=user_id,
-            expires_at=expires_at
-        )
-        db.add(db_token)
-        db.commit()
-        db.refresh(db_token)
-        return db_token
+        token_entity = refresh_token_entity.store_refresh_token(user_email, token, expires_at)
+        return token_entity  
     
     @staticmethod
-    def verify_refresh_token(db: Session, token: str) -> Optional[RefreshToken]:
+    def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
         """리프레시 토큰 검증"""
-        db_token = db.query(RefreshToken).filter(
-            RefreshToken.token == token,
-            RefreshToken.is_revoked == False,
-            RefreshToken.expires_at > datetime.now(timezone.utc)
-        ).first()
-        return db_token
+        token_entity = refresh_token_entity.verify_refresh_token(token)
+        return token_entity  
     
     @staticmethod
-    def revoke_refresh_token(db: Session, token: str):
+    def revoke_refresh_token(token: str):
         """리프레시 토큰 무효화"""
-        db.query(RefreshToken).filter(RefreshToken.token == token).update(
-            {"is_revoked": True}
-        )
-        db.commit()
+        refresh_token_entity.revoke_refresh_token(token)
     
     @staticmethod
-    def activate_user(db: Session, email: str):
+    def activate_user(email: str) -> Optional[Dict[str, Any]]:
         """사용자 계정 활성화"""
-        user = AuthService.get_user_by_email(db, email)
-        if user:
-            user.is_active = True
-            user.is_verified = True
-            db.commit()
-            db.refresh(user)
-        return user
+        user = user_entity.activate_user(email)
+        return user     
 
 
 auth_service = AuthService()

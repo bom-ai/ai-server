@@ -4,7 +4,6 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional
 from app.core.config import get_settings
 
 settings = get_settings()

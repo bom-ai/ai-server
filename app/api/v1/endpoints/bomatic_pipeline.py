@@ -2,78 +2,18 @@
 전체 파이프라인 API 엔드포인트
 """
 import json
-from typing import List, Literal, Dict
+from typing import List, Literal
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Response, Query, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 
 from app.models.schemas import BatchAnalysisResponse, FileMappingValidation
 from app.services.pipeline_service import pipeline_service
-from app.services.auth_service import AuthService
-from app.models.database import get_db
+from app.api.deps import get_current_user  # 별도 deps 파일에서 import
 from app.utils.docx_processor import (
     fill_frame_with_analysis_bytes,
     replace_analysis_with_parsed,
-    parse_analysis_sections_any,
 )
 
 router = APIRouter()
-security = HTTPBearer()
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-):
-    """
-    토큰을 검증하고 현재 사용자 정보를 반환합니다.
-    """
-    token = credentials.credentials
-    try:
-        # JWT 토큰 검증하여 payload 얻기
-        payload = AuthService.verify_token(token)
-        email = payload.get("sub")
-        
-        if not email:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid token payload",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        # 데이터베이스에서 사용자 정보 조회
-        user = AuthService.get_user_by_email(db, email)
-        if not user:
-            raise HTTPException(
-                status_code=401,
-                detail="User not found",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        if not user.is_active:
-            raise HTTPException(
-                status_code=401,
-                detail="Inactive user",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        # 실제 사용자 정보 반환
-        return {
-            "user_id": user.id,
-            "email": user.email,
-            "is_active": user.is_active,
-            "is_verified": user.is_verified
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
 
 @router.post("/request-analysis")
 async def request_analysis(
@@ -86,7 +26,6 @@ async def request_analysis(
 ):
     """
     배치 분석 작업을 요청하고, 파일들을 직접 업로드할 서명된 URL들을 발급받습니다.
-    (Pydantic 모델을 사용하지 않는 버전)
     """
     # 1. 입력 값 유효성 검사
     if not frame.filename or not frame.filename.lower().endswith('.docx'):
@@ -112,11 +51,12 @@ async def request_analysis(
             filenames=filenames,
             mapping=mapping_dict,
             template_type=template_type,
-            user_id=current_user.get("user_id")
+            user_id=str(current_user.get("id"))  # deps.py에서는 "id" 키 사용
         )
         return result
         
     except Exception as e:
+        print(f"Request analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"서버 내부 오류가 발생했습니다: {e}")
 
 @router.post("/start-analysis/{job_id}", response_model=BatchAnalysisResponse)

@@ -38,8 +38,10 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60  # 1시간
     refresh_token_expire_days: int = 7     # 7일
     
-    # 데이터베이스 설정
-    database_url: Optional[str] = os.getenv("DATABASE_URL")
+    # Google Cloud 설정
+    google_cloud_project: Optional[str] = os.getenv("GOOGLE_CLOUD_PROJECT")
+    google_application_credentials: Optional[str] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    firestore_database: str = os.getenv("FIRESTORE_DATABASE")
     
     # 이메일 설정
     mail_server: Optional[str] = os.getenv("MAIL_SERVER")
@@ -54,27 +56,13 @@ class Settings(BaseSettings):
     stt_poll_interval: int = 2
     
     # Google Cloud Storage 설정
-    gcs_bucket_name: Optional[str] = os.getenv("GCS_BUCKET_NAME", "bomatic_audios")
-    google_application_credentials: Optional[str] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    gcs_bucket_name: Optional[str] = os.getenv("GCS_BUCKET_NAME")
     
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         extra = "ignore"  # 추가 필드 무시
 
-"""
-핵심 기능들:
-1. 싱글톤 패턴 구현
-    - @lru_cache()를 통해 Settings 객체를 한 번만 생성하고 캐시
-    - 메모리 효율성과 일관성 보장
-2. 전역 접근
-    - 앱 전체에서 from app.core.config import settings로 동일한 설정 객체 사용
-    - 설정 변경 시 모든 모듈에 즉시 반영
-3. 환경변수 자동 로드
-    - 앱 시작 시 .env 파일과 시스템 환경변수를 자동으로 읽어와 설정 초기화
-4. 타입 안정성
-    - Pydantic의 검증 기능으로 잘못된 설정값 사전 차단
-"""
 
 @lru_cache()
 def get_settings() -> Settings:
