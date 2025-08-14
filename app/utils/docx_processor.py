@@ -340,11 +340,9 @@ def fill_frame_with_analysis_bytes(json_data: dict, frame_docx_bytes: bytes) -> 
     수정된 DOCX를 bytes로 반환 (강화된 디버깅)
     """
     print("🔥 === fill_frame_with_analysis_bytes 함수 시작 ===")
-    print(f"JSON 데이터 구조: {json.dumps(json_data, indent=2, ensure_ascii=False)[:1000]}...")
     
     results = json_data.get("results", {})
     if not results:
-        print("⚠️ WARNING: JSON 데이터에 'results'가 없거나 비어있습니다.")
         return frame_docx_bytes
 
     # 1. JSON 데이터를 파싱하여 {group: {header: analysis}} 형태의 맵 생성
