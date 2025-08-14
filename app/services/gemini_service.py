@@ -72,7 +72,7 @@ class GeminiService:
                 
                 # google-genai 방식으로 요청
                 response = await self._client.aio.models.generate_content(
-                    model="gemini-2.5-pro",
+                    model="models/gemini-2.5-pro",
                     contents=[
                         {"role": "model", "parts": [{"text": system_prompt}]},
                         {"role": "user", "parts": [{"text": text_content}]}
