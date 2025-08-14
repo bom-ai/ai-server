@@ -55,7 +55,7 @@ class GeminiService:
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_CIVIC_INTEGRITY", "threshold": "BLOCK_NONE" }
+            {"category": "HARM_CATEGORY_CIVIC_INTEGRITY", "threshold": "BLOCK_NONE"}
         ]
         
         for attempt in range(max_retries):
@@ -84,23 +84,42 @@ class GeminiService:
                     }
                 )
                 
-                # 응답 검증
+                # 응답 상세 로깅
+                logger.info(f"Response candidates count: {len(response.candidates) if response.candidates else 0}")
+                
+                # 응답 검증 개선
                 if response.candidates and len(response.candidates) > 0:
                     candidate = response.candidates[0]
-                    if candidate.content and candidate.content.parts:
-                        logger.info(f"Gemini API call successful on attempt {attempt + 1}")
-                        return candidate.content.parts[0].text
-                
-                # finish_reason 확인
-                finish_reason = candidate.finish_reason if response.candidates else "UNKNOWN"
-                logger.warning(f"No valid response parts. Finish reason: {finish_reason}")
-                
-                # 안전 필터링인 경우 특별 처리
-                if finish_reason == "SAFETY":
-                    logger.warning("Content blocked by safety filter. Trying with modified prompt...")
-                    raise Exception(f"Content blocked by safety filter (finish_reason: {finish_reason})")
+                    finish_reason = candidate.finish_reason if hasattr(candidate, 'finish_reason') else "UNKNOWN"
+                    
+                    logger.info(f"Candidate finish_reason: {finish_reason}")
+                    
+                    # STOP은 정상 완료이므로 처리
+                    if finish_reason in ["STOP", "MAX_TOKENS"]:
+                        if candidate.content and candidate.content.parts and len(candidate.content.parts) > 0:
+                            text_content_result = candidate.content.parts[0].text
+                            if text_content_result and text_content_result.strip():
+                                logger.info(f"Gemini API call successful on attempt {attempt + 1}")
+                                return text_content_result.strip()
+                            else:
+                                logger.warning("Response text is empty or None")
+                                raise Exception("Response text is empty")
+                        else:
+                            logger.warning("No content parts in response")
+                            raise Exception("No content parts in response")
+                    
+                    # 안전 필터링인 경우
+                    elif finish_reason == "SAFETY":
+                        logger.warning("Content blocked by safety filter")
+                        raise Exception(f"Content blocked by safety filter (finish_reason: {finish_reason})")
+                    
+                    # 기타 이유
+                    else:
+                        logger.warning(f"Unexpected finish_reason: {finish_reason}")
+                        raise Exception(f"Unexpected finish_reason: {finish_reason}")
                 else:
-                    raise Exception(f"Invalid response format (finish_reason: {finish_reason})")
+                    logger.warning("No candidates in response")
+                    raise Exception("No candidates in response")
                 
             except Exception as e:
                 logger.error(f"Gemini API call failed on attempt {attempt + 1}: {str(e)}")
