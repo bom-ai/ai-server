@@ -2,8 +2,7 @@
 Gemini AI 서비스
 """
 import asyncio
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google import genai
 from fastapi import HTTPException
 from typing import List, Optional, Literal
 
@@ -16,15 +15,16 @@ class GeminiService:
     
     def __init__(self):
         self.api_key = settings.gemini_api_key
+        self._client = None
         self._initialized = False
     
-    def _initialize(self) -> bool:  # 클래스 내부 전용 Private 메서드 (호출은 가능하지만 _ 붙인 건 관례상 내부에서만!)
+    def _initialize(self) -> bool:
         """Gemini API를 초기화합니다."""
         if not self.api_key:
             return False
         
         try:
-            genai.configure(api_key=self.api_key)
+            self._client = genai.Client(api_key=self.api_key)
             self._initialized = True
             return True
         except Exception:
@@ -49,13 +49,14 @@ class GeminiService:
         max_retries = 3
         base_retry_delay = 5
         
-        # 안전 설정을 최대한 완화
-        safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        }
+        # 안전 설정을 최대한 완화 (google-genai 방식)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_CIVIC_INTEGRITY", "threshold": "BLOCK_NONE" }
+        ]
         
         for attempt in range(max_retries):
             try:
@@ -67,35 +68,39 @@ class GeminiService:
                     template_type=template_type
                 )
                 
-                model = genai.GenerativeModel(
-                    model_name='gemini-2.5-pro',
-                    system_instruction=system_prompt
-                )
-                
                 logger.info(f"Generating content with text length: {len(text_content)}")
                 
-                # 안전 설정과 함께 요청
-                response = model.generate_content(
-                    text_content,
-                    safety_settings=safety_settings
+                # google-genai 방식으로 요청
+                response = await self._client.aio.models.generate_content(
+                    model="gemini-2.5-pro",
+                    contents=[
+                        {"role": "model", "parts": [{"text": system_prompt}]},
+                        {"role": "user", "parts": [{"text": text_content}]}
+                    ],
+                    config={
+                        "safety_settings": safety_settings,
+                        "temperature": 0.1,
+                        "max_output_tokens": 65535
+                    }
                 )
                 
                 # 응답 검증
-                if response.candidates and response.candidates[0].content.parts:
-                    logger.info(f"Gemini API call successful on attempt {attempt + 1}")
-                    return response.text
+                if response.candidates and len(response.candidates) > 0:
+                    candidate = response.candidates[0]
+                    if candidate.content and candidate.content.parts:
+                        logger.info(f"Gemini API call successful on attempt {attempt + 1}")
+                        return candidate.content.parts[0].text
+                
+                # finish_reason 확인
+                finish_reason = candidate.finish_reason if response.candidates else "UNKNOWN"
+                logger.warning(f"No valid response parts. Finish reason: {finish_reason}")
+                
+                # 안전 필터링인 경우 특별 처리
+                if finish_reason == "SAFETY":
+                    logger.warning("Content blocked by safety filter. Trying with modified prompt...")
+                    raise Exception(f"Content blocked by safety filter (finish_reason: {finish_reason})")
                 else:
-                    # finish_reason 확인
-                    finish_reason = response.candidates[0].finish_reason if response.candidates else "UNKNOWN"
-                    logger.warning(f"No valid response parts. Finish reason: {finish_reason}")
-                    
-                    # 안전 필터링인 경우 특별 처리
-                    if finish_reason == 1:  # SAFETY
-                        logger.warning("Content blocked by safety filter. Trying with modified prompt...")
-                        # 다음 시도에서 사용할 대체 프롬프트나 전처리 로직 추가 가능
-                        raise Exception(f"Content blocked by safety filter (finish_reason: {finish_reason})")
-                    else:
-                        raise Exception(f"Invalid response format (finish_reason: {finish_reason})")
+                    raise Exception(f"Invalid response format (finish_reason: {finish_reason})")
                 
             except Exception as e:
                 logger.error(f"Gemini API call failed on attempt {attempt + 1}: {str(e)}")
