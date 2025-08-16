@@ -51,7 +51,6 @@ async def request_analysis(
             filenames=filenames,
             mapping=mapping_dict,
             template_type=template_type,
-            user_id=str(current_user.get("id"))  # deps.py에서는 "id" 키 사용
         )
         return result
         
@@ -68,7 +67,7 @@ async def start_analysis(
     클라이언트가 GCS로 파일 업로드를 완료한 후, 실제 분석 작업을 시작하도록 지시합니다.
     """
     try:
-        await pipeline_service.start_batch_analysis(job_id, user_id=current_user.get("user_id"))
+        await pipeline_service.start_batch_analysis(job_id)
         job_info = await pipeline_service.get_batch_status(job_id)
 
         return BatchAnalysisResponse(
@@ -163,7 +162,6 @@ async def bomatic_analyze(
             audio_contents,  # UploadFile 대신 내용을 전달
             mapping_dict,
             template_type,
-            user_id=current_user.get("user_id")  # 사용자 ID 추가
         )
         
         return BatchAnalysisResponse(

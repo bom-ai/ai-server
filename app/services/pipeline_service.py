@@ -106,7 +106,6 @@ class PipelineService:
         filenames: List[str],
         mapping: dict,
         template_type: Literal["raw", "refined"],
-        user_id: str
     ) -> Dict[str, Any]:
         """분석 작업을 위한 job_id와 서명된 URL들을 생성하고 반환합니다."""
         job_id = str(uuid.uuid4())
@@ -116,7 +115,7 @@ class PipelineService:
         gcs_object_names = {}
         for filename in filenames:
             # 사용자별, 작업별로 고유한 경로 생성
-            object_name = f"audio/{user_id}/{job_id}/{filename}"
+            object_name = f"audio/{job_id}/{filename}"
             signed_url = self.generate_signed_url(object_name)
             upload_urls[filename] = signed_url
             gcs_object_names[filename] = object_name
@@ -125,7 +124,6 @@ class PipelineService:
         self.batch_jobs[job_id] = {
             "status": "pending_upload",
             "message": "파일 업로드를 기다리는 중입니다.",
-            "user_id": user_id,
             "frame_content": frame_content,
             "mapping": mapping,
             "gcs_object_names": gcs_object_names, # GCS 경로 저장
@@ -141,16 +139,14 @@ class PipelineService:
             "upload_urls": upload_urls
         }
     
-    async def start_batch_analysis(self, job_id: str, user_id: str):
+    async def start_batch_analysis(self, job_id: str):
         """업로드가 완료된 파일들의 분석을 시작합니다."""
         if job_id not in self.batch_jobs:
             raise ValueError("해당 작업을 찾을 수 없습니다.")
         
         job_info = self.batch_jobs[job_id]
         
-        if job_info.get("user_id") != user_id:
-            raise ValueError("작업에 대한 권한이 없습니다.")
-            
+          
         if job_info["status"] != "pending_upload":
             raise ValueError("이미 처리 중이거나 완료된 작업입니다.")
 
