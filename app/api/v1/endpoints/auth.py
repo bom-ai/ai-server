@@ -2,6 +2,7 @@
 인증 관련 API 엔드포인트
 """
 from fastapi import APIRouter, HTTPException, status, Query
+from fastapi.responses import RedirectResponse
 from datetime import datetime, timezone, timedelta
 from app.models.schemas import (
     UserLogin, UserRegister, TokenResponse, 
@@ -14,6 +15,8 @@ import secrets
 import jwt
 
 router = APIRouter()
+
+FRONTEND_VERIFY_URL = "https://bomatic.vercel.app/verification-result"
 
 @router.post("/register", response_model=RegisterResponse)
 async def register(user_data: UserRegister):
@@ -128,9 +131,8 @@ async def refresh_token(token_data: RefreshTokenRequest):
 @router.get("/verify")
 async def verify_email(token: str = Query(...)):
     """이메일 인증"""
-    try:
-        settings = get_settings()
-        
+    settings = get_settings()
+    try:        
         # JWT 토큰 검증
         try:
             payload = jwt.decode(
@@ -176,10 +178,7 @@ async def verify_email(token: str = Query(...)):
         # 사용자 인증 처리
         AuthService.activate_user(email)
         
-        return {
-            "message": f"{email} 계정의 이메일 인증이 완료되었습니다.",
-            "status": "success"
-        }
+        return RedirectResponse(url=f"{FRONTEND_VERIFY_URL}?status=success&email={email}")
         
     except HTTPException:
         raise
