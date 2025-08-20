@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     
     # API Keys
     gemini_api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
+    openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     daglo_api_key: Optional[str] = os.getenv("DAGLO_API_KEY")
     
     # JWT 설정
