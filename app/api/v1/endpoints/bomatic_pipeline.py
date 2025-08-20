@@ -21,6 +21,7 @@ async def request_analysis(
     filenames: List[str] = Form(..., description="업로드할 오디오 파일명 목록"),
     mapping: str = Form(..., description="{'파일명': '그룹명'} 형태의 JSON 문자열"),
     template_type: str = Form("refined", description="분석 템플릿 타입 ('raw' 또는 'refined')"),
+    ai_provider: str = Form("openai", description="AI 제공자 ('gemini' 또는 'openai')"),
     frame: UploadFile = File(..., description="분석 프레임 (.docx 파일)"),
     current_user: dict = Depends(get_current_user)
 ):
@@ -33,6 +34,9 @@ async def request_analysis(
 
     if template_type not in ["raw", "refined"]:
         raise HTTPException(status_code=400, detail="template_type은 'raw' 또는 'refined'만 가능합니다.")
+    
+    if ai_provider not in ["gemini", "openai"]:
+        raise HTTPException(status_code=400, detail="ai_provider는 'gemini' 또는 'openai'만 가능합니다.")
 
     try:
         mapping_dict = json.loads(mapping)
@@ -51,6 +55,7 @@ async def request_analysis(
             filenames=filenames,
             mapping=mapping_dict,
             template_type=template_type,
+            ai_provider=ai_provider,
         )
         return result
         
@@ -89,6 +94,10 @@ async def bomatic_analyze(
     template_type: Literal["raw", "refined"] = Query(
         "refined",
         description="분석에 사용할 프롬프트 템플릿 ('raw' 또는 'refined')"
+    ),
+    ai_provider: Literal["gemini", "openai"] = Query(
+        "openai",
+        description="AI 제공자 ('gemini' 또는 'openai')"
     ),
     current_user = Depends(get_current_user)  # 인증 의존성 추가
 ):
@@ -157,11 +166,12 @@ async def bomatic_analyze(
             })
         
         # pipeline_service를 통해 배치 분석 작업 시작 (사용자 ID 포함)
-        job_id = await pipeline_service.start_batch_analysis(
+        job_id = await pipeline_service.start_batch_analysis_with_content(
             frame_content, 
             audio_contents,  # UploadFile 대신 내용을 전달
             mapping_dict,
             template_type,
+            ai_provider,
         )
         
         return BatchAnalysisResponse(

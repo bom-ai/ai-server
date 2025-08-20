@@ -4,16 +4,15 @@
 import asyncio
 import uuid
 import os
-from dotenv import load_dotenv
-from typing import Dict, Any, List, Optional, Literal
+from typing import Dict, Any, List, Literal
 from datetime import timedelta
 from google.cloud import storage
 
 from app.services.stt_service import stt_service
 from app.services.gemini_service import gemini_service
+from app.services.openai_service import openai_service
 from app.core.config import settings
 from app.utils.docx_processor import (
-    extract_text_with_separated_tables, 
     extract_table_headers_with_subitems,
     format_items_for_prompt
 )
@@ -25,6 +24,7 @@ class PipelineService:
     def __init__(self):
         self.stt_service = stt_service
         self.gemini_service = gemini_service
+        self.openai_service = openai_service
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
         # 배치 작업 저장소
         self.batch_jobs = {}
@@ -106,6 +106,7 @@ class PipelineService:
         filenames: List[str],
         mapping: dict,
         template_type: Literal["raw", "refined"],
+        ai_provider: Literal["gemini", "openai"] = "openai",  # 새로운 파라미터 추가
     ) -> Dict[str, Any]:
         """분석 작업을 위한 job_id와 서명된 URL들을 생성하고 반환합니다."""
         job_id = str(uuid.uuid4())
@@ -128,6 +129,7 @@ class PipelineService:
             "mapping": mapping,
             "gcs_object_names": gcs_object_names, # GCS 경로 저장
             "template_type": template_type,
+            "ai_provider": ai_provider,  # AI 제공자 정보 저장
             "total_files": len(filenames),
             "processed_files": 0,
             "results": {},
@@ -158,6 +160,104 @@ class PipelineService:
         
         return job_id
 
+    async def start_batch_analysis_with_content(
+        self,
+        frame_content: bytes,
+        audio_contents: List[Dict[str, Any]],
+        mapping_dict: Dict[str, str],
+        template_type: Literal["raw", "refined"],
+        ai_provider: Literal["gemini", "openai"] = "gemini",
+    ) -> str:
+        """오디오 컨텐츠를 직접 받아서 배치 분석을 시작하는 함수 (레거시 호환용)"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        job_id = str(uuid.uuid4())
+        
+        # 작업 정보 저장
+        self.batch_jobs[job_id] = {
+            "status": "processing",
+            "message": "배치 분석 작업 진행 중...",
+            "frame_content": frame_content,
+            "mapping": mapping_dict,
+            "template_type": template_type,
+            "ai_provider": ai_provider,
+            "total_files": len(audio_contents),
+            "processed_files": 0,
+            "results": {},
+            "errors": {}
+        }
+
+        try:
+            # 프레임 파일 처리
+            structured_items = extract_table_headers_with_subitems(frame_content)
+            custom_items = format_items_for_prompt(structured_items)
+            
+            logger.info(f"Job {job_id}: Processing {len(audio_contents)} audio files with {ai_provider}")
+            
+            for i, audio_data in enumerate(audio_contents):
+                filename = audio_data['filename']
+                audio_content = audio_data['content']
+                group_name = mapping_dict.get(filename, "Unknown Group")
+                
+                logger.info(f"Job {job_id}: Processing file {i+1}/{len(audio_contents)}: {filename}")
+                
+                try:
+                    # STT 처리 (오디오 바이트 직접 사용)
+                    logger.info(f"Job {job_id}: Starting STT for {filename}")
+                    stt_result = await self.stt_service.request_stt(audio_content)
+                    rid = stt_result.get("rid")
+                    
+                    if rid:
+                        transcribed_text = await self.stt_service.wait_for_completion(rid)
+                        logger.info(f"Job {job_id}: STT completed for {filename}")
+                        
+                        # Rate Limiting 대기 시간
+                        if i > 0: 
+                            await asyncio.sleep(min(5, i * 2))
+                        
+                        # AI 분석 (제공자에 따라 선택)
+                        if ai_provider == "openai":
+                            logger.info(f"Job {job_id}: Using OpenAI for analysis of {filename}")
+                            analysis_result = await self.openai_service.analyze_text(
+                                text_content=transcribed_text,
+                                custom_items=custom_items,
+                                template_type=template_type
+                            )
+                        else:  # 기본값은 gemini
+                            logger.info(f"Job {job_id}: Using Gemini for analysis of {filename}")
+                            analysis_result = await self.gemini_service.analyze_text(
+                                text_content=transcribed_text,
+                                custom_items=custom_items,
+                                template_type=template_type
+                            )
+                        
+                        self.batch_jobs[job_id]["results"][filename] = {
+                            "group": group_name,
+                            "transcribed_text": transcribed_text,
+                            "analysis": analysis_result
+                        }
+                        
+                    else:
+                        raise Exception("STT 요청 ID를 받지 못했습니다.")
+
+                except Exception as e:
+                    error_msg = str(e)
+                    self.batch_jobs[job_id]["errors"][filename] = error_msg
+                    logger.error(f"Job {job_id}: Error processing {filename}: {error_msg}", exc_info=True)
+                
+                self.batch_jobs[job_id]["processed_files"] = i + 1
+
+            self.batch_jobs[job_id]["status"] = "completed"
+            self.batch_jobs[job_id]["message"] = "배치 분석 작업이 완료되었습니다."
+            
+        except Exception as e:
+            self.batch_jobs[job_id]["status"] = "failed"
+            self.batch_jobs[job_id]["message"] = f"배치 분석 중 오류 발생: {str(e)}"
+            logger.error(f"Job {job_id}: Batch analysis failed: {str(e)}", exc_info=True)
+        
+        return job_id
+
     async def _batch_analysis_task(self, job_id: str):
         """배치 분석 작업을 백그라운드에서 처리합니다."""
         import logging
@@ -168,6 +268,7 @@ class PipelineService:
         mapping = job_info["mapping"]
         gcs_object_names = job_info["gcs_object_names"]
         template_type = job_info["template_type"]
+        ai_provider = job_info["ai_provider"]  # AI 제공자 정보 가져오기
 
         try:
             # 프레임 파일 처리
@@ -207,12 +308,21 @@ class PipelineService:
                         if i > 0: 
                             await asyncio.sleep(min(5, i * 2))
                         
-                        # Gemini 분석
-                        analysis_result = await self.gemini_service.analyze_text(
-                            text_content=transcribed_text,
-                            custom_items=custom_items,
-                            template_type=template_type
-                        )
+                        # AI 분석 (제공자에 따라 선택)
+                        if ai_provider == "openai":
+                            logger.info(f"Job {job_id}: Using OpenAI for analysis of {filename}")
+                            analysis_result = await self.openai_service.analyze_text(
+                                text_content=transcribed_text,
+                                custom_items=custom_items,
+                                template_type=template_type
+                            )
+                        else:  # gemini (LEGACY)
+                            logger.info(f"Job {job_id}: Using Gemini for analysis of {filename}")
+                            analysis_result = await self.gemini_service.analyze_text(
+                                text_content=transcribed_text,
+                                custom_items=custom_items,
+                                template_type=template_type
+                            )
                         
                         job_info["results"][filename] = {
                             "group": group_name,
