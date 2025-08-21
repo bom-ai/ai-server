@@ -15,6 +15,7 @@ from tenacity import (
     after_log,
 )
 import time
+import tiktoken
 
 from app.core.config import settings
 from app.core.prompts import generate_system_prompt_from_docx
@@ -77,6 +78,21 @@ class RateLimitManager:
             "gpt-5": {"tpm": 30000, "rpm": 500},  # Tokens Per Minute, Requests Per Minute
             "gpt-4o": {"tpm": 30000, "rpm": 500}
         }
+        
+        # tiktoken 인코더 캐시 (성능 최적화)
+        self._encoders = {}
+    
+    def _get_encoder(self, model_name: str):
+        """모델별 tiktoken 인코더를 가져옵니다 (캐싱됨)"""
+        if model_name not in self._encoders:
+            try:
+                encoder_model = model_name
+                self._encoders[model_name] = tiktoken.encoding_for_model(encoder_model)
+            except KeyError:
+                # 지원되지 않는 모델인 경우 cl100k_base 인코더 사용 (GPT-4 계열)
+                logging.warning(f"Model {model_name} not supported by tiktoken, using cl100k_base")
+                self._encoders[model_name] = tiktoken.get_encoding("cl100k_base")
+        return self._encoders[model_name]
     
     async def acquire_slot(self, model_name: str):
         """모델별 슬롯 획득 (await 필요)"""
@@ -103,9 +119,17 @@ class RateLimitManager:
         finally:
             self.release_slot(model_name)
     
-    def estimate_tokens(self, text: str) -> int:
-        """텍스트의 대략적인 토큰 수 추정 (1토큰 ≈ 4글자)"""
-        return len(text) // 4
+    def estimate_tokens(self, text: str, model_name: str = "gpt-4o") -> int:
+        """tiktoken을 사용한 정확한 토큰 수 계산"""
+        try:
+            encoder = self._get_encoder(model_name)
+            tokens = encoder.encode(text)
+            return len(tokens)
+        except Exception as e:
+            # tiktoken 실패 시 fallback to 보수적 추정
+            logging.warning(f"tiktoken failed for model {model_name}: {e}, using fallback estimation")
+            # 한국어 특성을 고려한 보수적 추정 (2글자 ≈ 1토큰)
+            return len(text) // 2
     
     async def wait_for_rate_limit(self, model_name: str, estimated_tokens: int):
         """Rate Limit을 고려한 사전 대기 (예방적 조치)"""
@@ -224,7 +248,7 @@ class OpenAIService:
         return self._generate_fallback_response(custom_items, "All models exhausted")
 
     @retry(
-        stop=stop_after_attempt(5),  # 최대 5번 재시도
+        stop=stop_after_attempt(3),  # 최대 3번 재시도
         wait=custom_wait_strategy,  # 커스텀 대기 전략 사용
         retry=retry_if_exception_type((Exception,)),
         before_sleep=before_sleep_log(logging.getLogger(__name__), logging.INFO),
@@ -239,20 +263,26 @@ class OpenAIService:
     ) -> Optional[str]:
         """Tenacity를 사용한 재시도 로직이 포함된 API 호출"""
         
-        # Rate Limit 관리
+        # Rate Limit 관리 - tiktoken을 사용한 정확한 토큰 계산
         total_text = system_prompt + text_content
-        estimated_tokens = self.rate_limit_manager.estimate_tokens(total_text)
+        estimated_tokens = self.rate_limit_manager.estimate_tokens(total_text, model_name)
+        
+        logger.info(f"Accurate token count for {model_name}: {estimated_tokens} tokens")
+        print(f"Accurate token count for {model_name}: {estimated_tokens} tokens")
         
         # 토큰 수가 너무 많으면 텍스트 축소
-        if estimated_tokens > 28000:  # TPM: 30000 토큰
+        if estimated_tokens > 25000:
             logger.warning(f"Text too long ({estimated_tokens} tokens), truncating...")
             print(f"Text too long ({estimated_tokens} tokens), truncating...")
-            # 텍스트 길이를 80%로 축소
+            
             max_length = int(len(text_content) * 0.8)
-            text_content = text_content[:max_length] + "\n\n[텍스트가 길어 일부 내용이 생략되었습니다.]"
-            estimated_tokens = self.rate_limit_manager.estimate_tokens(system_prompt + text_content)
+            text_content = text_content[:max_length] + "\n\n[텍스트가 길어 일부 내용이 생략되었습니다. 전체 내용 분석이 필요한 경우 텍스트를 나누어 요청하세요.]"
+            
+            # 재계산
+            estimated_tokens = self.rate_limit_manager.estimate_tokens(system_prompt + text_content, model_name)
             logger.info(f"Truncated to {estimated_tokens} tokens")
             print(f"Truncated to {estimated_tokens} tokens")
+
         
         # Rate Limit 대기
         await self.rate_limit_manager.wait_for_rate_limit(model_name, estimated_tokens)
