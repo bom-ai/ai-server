@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     
     # STT 설정
     stt_max_attempts: int = 150
-    stt_poll_interval: int = 2
+    stt_poll_interval: int = 3
     
     # Google Cloud Storage 설정
     gcs_bucket_name: Optional[str] = os.getenv("GCS_BUCKET_NAME")
