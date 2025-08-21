@@ -2,7 +2,7 @@
 시스템 프롬프트 관리
 for Google Gemini API
 """
-from typing import List, Dict, Optional, Literal
+from typing import List, Literal
 
 FGD_ANALYSIS_TEMPLATE_RAW = """
 ```
@@ -137,6 +137,23 @@ FGD_ANALYSIS_TEMPLATE_REFINED = """
 ```
 """
 
+SYSTEM_PROMPT_MERGE = """
+[Persona]
+당신은 두 개의 부분적인 FGD 분석 보고서를 하나의 완결된 최종 보고서로 병합하는 시니어 리서처입니다. 당신의 목표는 각 항목의 내용이 논리적, 시간적 흐름에 맞게 자연스럽게 연결되도록 하여, 마치 처음부터 하나의 완전한 텍스트로 분석된 것처럼 만드는 것입니다.
+
+[Primary Task]
+주어진 두 개의 분석 결과(ANALYSIS PART 1, ANALYSIS PART 2)를 아래 [Items] 목록에 따라 하나의 통일된 보고서로 재구성합니다.
+
+[Items]
+{items_list}
+
+[Crucial Guidelines for Merging]
+1.  **논리적 결합**: 각 항목(예: "1. 스킨케어에 대한 태도")에 대해, 두 분석 결과에 흩어져 있는 내용을 하나로 합치세요. 내용의 순서는 원래 대화의 흐름을 따라야 합니다.
+2.  **중복 제거**: 중복되는 항목 제목을 제거하고, 각 항목이 최종 보고서에 한 번만 나타나도록 하세요. 겹치는 발화 내용은 자연스럽게 한 번만 포함되도록 정리합니다.
+3.  **원본 규칙 유지**: 최초 분석 프롬프트의 [Crucial Guidelines]와 [Output Format]을 100% 준수해야 합니다. 절대 요약하거나, 분석적 표현을 사용하거나, 원문을 훼손해서는 안 됩니다. 모든 뉘앙스와 발화 내용을 그대로 보존하세요.
+4.  **자연스러운 흐름**: "PART 1"의 마지막 내용과 "PART 2"의 시작 내용이 부드럽게 이어지도록 문장을 재구성하되, 원문 내용은 절대 변경하지 마세요.
+"""
+
 
 def format_items_list(items: List[str]) -> str:
     """Items 리스트를 번호가 매겨진 문자열로 포맷팅합니다."""
@@ -146,15 +163,16 @@ def format_items_list(items: List[str]) -> str:
 def generate_system_prompt_from_docx(
     file_content,  # bytes 또는 str을 받을 수 있도록 타입 힌트 제거
     template_type: Literal["raw", "refined"] = "refined"
-) -> str:
+) -> tuple[str, str]:
     """
-    DOCX 파일에서 추출한 테이블 구조를 기반으로 시스템 프롬프트를 생성합니다.
+    DOCX 파일에서 추출한 테이블 구조를 기반으로 시스템 프롬프트 두 개를 생성합니다.
     
     Args:
         file_content: DOCX 파일의 바이트 내용 또는 이미 처리된 커스텀 아이템 문자열
+        template_type: 사용할 템플릿 타입 ("raw" 또는 "refined")
     
     Returns:
-        완성된 시스템 프롬프트 문자열
+        tuple: (분석용 시스템 프롬프트, 병합용 시스템 프롬프트)
     """
     try:
         if template_type == "raw":
@@ -175,12 +193,22 @@ def generate_system_prompt_from_docx(
             structured_items = extract_table_headers_with_subitems(file_content)
             custom_items_str = format_items_for_prompt(structured_items)
         else:
-            # bytes가 아닌 경우: 이미 처리된 custom_items 문자열로 사용
-            custom_items_str = str(file_content) if file_content else ""
+            # bytes가 아닌 경우: 이미 처리된 custom_items 문자열 또는 리스트로 사용
+            if isinstance(file_content, list):
+                # 리스트인 경우 format_items_list 함수 사용
+                custom_items_str = format_items_list(file_content)
+            else:
+                custom_items_str = str(file_content) if file_content else ""
         
-        # 시스템 프롬프트 생성 (문자열을 직접 삽입)
-        return selected_template.format(items_list=custom_items_str)
+        # 1. 분석용 시스템 프롬프트 생성
+        analysis_prompt = selected_template.format(items_list=custom_items_str)
+        
+        # 2. 병합용 시스템 프롬프트 생성
+        merge_prompt = SYSTEM_PROMPT_MERGE.format(items_list=custom_items_str)
+        
+        return (analysis_prompt, merge_prompt)
         
     except Exception as e:
         # 오류 발생 시 기본 프롬프트 반환
         print(f"DOCX 기반 프롬프트 생성 중 오류 발생: {str(e)}")
+        return selected_template.format(items_list=""), SYSTEM_PROMPT_MERGE.format(items_list="")

@@ -56,6 +56,34 @@ def custom_wait_strategy(retry_state):
     base_wait = min(60, 4 * (2 ** (retry_state.attempt_number - 1)))
     return base_wait
 
+def split_transcript_with_overlap(full_transcript, overlap_lines=5):
+    """
+    전체 녹취록 텍스트를 두 부분으로 나누고, 두 번째 부분에 문맥 유지를 위한 중첩 부분을 추가합니다.
+
+    :param full_transcript: 전체 녹취록 문자열
+    :param overlap_lines: 겹치게 할 라인 수 (기본값: 5)
+    :return: (첫 번째 부분, 겹쳐진 두 번째 부분) 튜플
+    """
+    lines = full_transcript.strip().split('\n')
+    if len(lines) < 20: # 너무 짧으면 굳이 나누지 않음
+        return full_transcript, ""
+
+    # 전체 라인의 약 절반 지점 찾기
+    mid_point = len(lines) // 2
+
+    # 첫 번째 부분
+    part1_lines = lines[:mid_point]
+    part1 = '\n'.join(part1_lines)
+
+    # 중첩될 부분 (첫 번째 부분의 마지막 N라인)
+    overlap_start_index = max(0, mid_point - overlap_lines)
+
+    # 두 번째 부분 (중첩 부분 + 나머지)
+    part2_lines = lines[overlap_start_index:]
+    part2_with_overlap = '\n'.join(part2_lines)
+
+    return part1, part2_with_overlap
+
 
 class RateLimitManager:
     """OpenAI API Rate Limit 관리자"""
@@ -257,32 +285,21 @@ class OpenAIService:
     async def _make_api_call_with_retry(
         self,
         model_name: str,
-        system_prompt: str,
+        system_prompt: tuple[str, str],
         text_content: str,
         logger
     ) -> Optional[str]:
         """Tenacity를 사용한 재시도 로직이 포함된 API 호출"""
         
         # Rate Limit 관리 - tiktoken을 사용한 정확한 토큰 계산
-        total_text = system_prompt + text_content
+        total_text = system_prompt[0] + text_content
         estimated_tokens = self.rate_limit_manager.estimate_tokens(total_text, model_name)
         
         logger.info(f"Accurate token count for {model_name}: {estimated_tokens} tokens")
         print(f"Accurate token count for {model_name}: {estimated_tokens} tokens")
         
-        # 토큰 수가 너무 많으면 텍스트 축소
-        if estimated_tokens > 25000:
-            logger.warning(f"Text too long ({estimated_tokens} tokens), truncating...")
-            print(f"Text too long ({estimated_tokens} tokens), truncating...")
-            
-            max_length = int(len(text_content) * 0.8)
-            text_content = text_content[:max_length] + "\n\n[텍스트가 길어 일부 내용이 생략되었습니다. 전체 내용 분석이 필요한 경우 텍스트를 나누어 요청하세요.]"
-            
-            # 재계산
-            estimated_tokens = self.rate_limit_manager.estimate_tokens(system_prompt + text_content, model_name)
-            logger.info(f"Truncated to {estimated_tokens} tokens")
-            print(f"Truncated to {estimated_tokens} tokens")
-
+        # 에러 방지를 위해 텍스트 반으로 자르기
+        (text_content_p1, text_content_p2) = split_transcript_with_overlap(text_content)
         
         # Rate Limit 대기
         await self.rate_limit_manager.wait_for_rate_limit(model_name, estimated_tokens)
@@ -295,80 +312,119 @@ class OpenAIService:
             print(f"Available slots for {model_name}: {self.rate_limit_manager.get_available_slots(model_name)}")
             
             try:
-                # OpenAI API 호출 -> 먼저 responses API 시도 (사용자가 제공한 코드 기반)
-                try:
-                    response = await asyncio.to_thread(
-                        self._client.responses.create,
-                        model=model_name,
-                        input=[
-                            {"role": "developer", "content": system_prompt},
-                            {"role": "user", "content": text_content}
-                        ]
-                    )
-                    
-                    # 응답 검증 (responses API)
-                    if response.output and len(response.output) > 0:
-                        # 마지막 출력이 메시지인지 확인
-                        last_output = response.output[-1]
-                        if hasattr(last_output, 'type') and last_output.type == 'message':
-                            status = response.status
-                            
-                            logger.info(f"Model {model_name} status: {status}")
-                            
-                            # 성공적인 응답 처리
-                            if status == "completed":
-                                if (hasattr(last_output, 'content') and 
-                                    last_output.content and 
-                                    len(last_output.content) > 0):
-                                    
-                                    # 텍스트 내용 추출
-                                    content_item = last_output.content[0]
-                                    if hasattr(content_item, 'text') and content_item.text:
-                                        result_text = content_item.text.strip()
-                                        if result_text:
-                                            logger.info(f"Model {model_name} successful response")
-                                            return result_text
-                            
-                            # 기타 문제인 경우 예외 발생하여 재시도
-                            raise Exception(f"Model {model_name} returned status: {status}")
-                                
-                    else:
-                        raise Exception(f"Model {model_name} returned no output")
+                # OpenAI API 호출 -> 앞쪽 절반 part 분석 수행
+                response_p1 = await asyncio.to_thread(
+                    self._client.responses.create,
+                    model=model_name,
+                    input=[
+                        {"role": "developer", "content": system_prompt[0]},
+                        {"role": "user", "content": text_content_p1}
+                    ]
+                )
+                
+                # 응답 검증 (responses API)
+                if response_p1.output and len(response_p1.output) > 0:
+                    # 마지막 출력이 메시지인지 확인
+                    last_output = response_p1.output[-1]
+                    if hasattr(last_output, 'type') and last_output.type == 'message':
+                        status = response_p1.status
                         
-                except AttributeError:
-                    # responses API가 없는 경우 일반 chat API 사용
-                    logger.info(f"Model {model_name}: responses API not available, trying chat API")
-                    response = await asyncio.to_thread(
-                        self._client.chat.completions.create,
-                        model=model_name,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": text_content}
-                        ],
-                        temperature=0.1,
-                        max_tokens=min(4096, 30000 - estimated_tokens)  # 응답 토큰 제한
-                    )
-                    
-                    # 응답 검증 (chat API)
-                    if response.choices and len(response.choices) > 0:
-                        choice = response.choices[0]
-                        finish_reason = choice.finish_reason
-                        
-                        logger.info(f"Model {model_name} finish_reason: {finish_reason}")
+                        logger.info(f"Model {model_name} status: {status}")
                         
                         # 성공적인 응답 처리
-                        if finish_reason in ["stop", "length"]:
-                            if choice.message and choice.message.content:
-                                result_text = choice.message.content.strip()
-                                if result_text:
-                                    logger.info(f"Model {model_name} successful response")
-                                    return result_text
+                        if status == "completed":
+                            if (hasattr(last_output, 'content') and 
+                                last_output.content and 
+                                len(last_output.content) > 0):
+                                
+                                # 텍스트 내용 추출
+                                content_item = last_output.content[0]
+                                if hasattr(content_item, 'text') and content_item.text:
+                                    result_text_p1 = content_item.text.strip()
                         
                         # 기타 문제인 경우 예외 발생하여 재시도
-                        raise Exception(f"Model {model_name} finish_reason: {finish_reason}")
+                        raise Exception(f"Model {model_name} returned status: {status}")
                             
-                    else:
-                        raise Exception(f"Model {model_name} returned no choices")
+                else:
+                    raise Exception(f"Model {model_name} returned no output")
+
+                # OpenAI API 호출 -> 뒷쪽 절반 part 분석 수행
+                rseponse_p2 = await asyncio.to_thread(
+                    self._client.responses.create,
+                    model=model_name,
+                    input=[
+                        {"role": "developer", "content": system_prompt[0]},
+                        {"role": "user", "content": text_content_p2}
+                    ]
+                )
+                
+                # 응답 검증 (responses API)
+                if rseponse_p2.output and len(rseponse_p2.output) > 0:
+                    # 마지막 출력이 메시지인지 확인
+                    last_output = rseponse_p2.output[-1]
+                    if hasattr(last_output, 'type') and last_output.type == 'message':
+                        status = rseponse_p2.status
+                        
+                        logger.info(f"Model {model_name} status: {status}")
+                        
+                        # 성공적인 응답 처리
+                        if status == "completed":
+                            if (hasattr(last_output, 'content') and 
+                                last_output.content and 
+                                len(last_output.content) > 0):
+                                
+                                # 텍스트 내용 추출
+                                content_item = last_output.content[0]
+                                if hasattr(content_item, 'text') and content_item.text:
+                                    result_text_p2 = content_item.text.strip()
+                        
+                        # 기타 문제인 경우 예외 발생하여 재시도
+                        raise Exception(f"Model {model_name} returned status: {status}")
+                
+                combined_analysis_input = f"""
+                [ANALYSIS PART 1 START]
+                {result_text_p1}
+                [ANALYSIS PART 1 END]
+
+                [ANALYSIS PART 2 START]
+                {result_text_p2}
+                [ANALYSIS PART 2 END]
+                """
+
+                rseponse = await asyncio.to_thread(
+                    self._client.responses.create,
+                    model=model_name,
+                    input=[
+                        {"role": "developer", "content": system_prompt[1]},
+                        {"role": "user", "content": combined_analysis_input}
+                    ]
+                )
+
+                # 응답 검증 (responses API)
+                if rseponse.output and len(rseponse.output) > 0:
+                    # 마지막 출력이 메시지인지 확인
+                    last_output = rseponse.output[-1]
+                    if hasattr(last_output, 'type') and last_output.type == 'message':
+                        status = rseponse.status
+                        
+                        logger.info(f"Model {model_name} status: {status}")
+                        
+                        # 성공적인 응답 처리
+                        if status == "completed":
+                            if (hasattr(last_output, 'content') and 
+                                last_output.content and 
+                                len(last_output.content) > 0):
+                                
+                                # 텍스트 내용 추출
+                                content_item = last_output.content[0]
+                                if hasattr(content_item, 'text') and content_item.text:
+                                    result_text = content_item.text.strip()
+                                    if result_text:
+                                        logger.info(f"Model {model_name} successful response")
+                                        return result_text
+                        
+                        # 기타 문제인 경우 예외 발생하여 재시도
+                        raise Exception(f"Model {model_name} returned status: {status}")
             
             except Exception as e:
                 error_msg = str(e)
@@ -397,8 +453,8 @@ class OpenAIService:
             self.model_stats[model_name]["attempts"] += 1
         
         try:
-            # custom_items를 기반으로 시스템 프롬프트 생성
-            system_prompt = generate_system_prompt_from_docx(
+            # custom_items를 기반으로 시스템 프롬프트 생성 (분석용과 병합용 두 개 반환)
+            (analysis_prompt, merge_prompt) = generate_system_prompt_from_docx(
                 file_content=(custom_items or []),
                 template_type=template_type
             )
@@ -406,7 +462,7 @@ class OpenAIService:
             # Tenacity를 사용한 재시도 API 호출
             result = await self._make_api_call_with_retry(
                 model_name=model_name,
-                system_prompt=system_prompt,
+                system_prompt=(analysis_prompt, merge_prompt),
                 text_content=text_content,
                 logger=logger
             )
