@@ -158,11 +158,11 @@ class OpenAIService:
         model_name: str,
         system_prompts: Dict[str, str],
         text_content: str
-    ) -> Optional[str]:  # logger 매개변수 제거
+    ) -> Optional[str]:
         """Tenacity를 사용한 재시도 로직이 포함된 API 호출"""
         
         # Rate Limit 관리 - tiktoken을 사용한 정확한 토큰 계산
-        total_text = system_prompts.analysis_prompt + text_content
+        total_text = system_prompts["analysis_prompt"] + text_content  # 수정된 부분
         estimated_tokens = self.rate_limit_manager.estimate_tokens(total_text, model_name)
         
         logger.info(f"Accurate token count for {model_name}: {estimated_tokens} tokens")
@@ -189,12 +189,12 @@ class OpenAIService:
                     self._client.responses.create,
                     model=model_name,
                     input=[
-                        {"role": "developer", "content": system_prompts.analysis_prompt},
+                        {"role": "developer", "content": system_prompts["analysis_prompt"]},  # 수정된 부분
                         {"role": "user", "content": text_content_p1}
                     ]
                 )
                 
-                # Part 1 응답 검증
+                # Part 1 응답 검증 (이전과 동일)
                 if response_p1.output and len(response_p1.output) > 0:
                     last_output = response_p1.output[-1]
                     if hasattr(last_output, 'type') and last_output.type == 'message':
@@ -223,16 +223,16 @@ class OpenAIService:
 
                 # ========== Part 2 분석 ==========
                 logger.info(f"Starting Part 2 analysis for {model_name}")
-                response_p2 = await asyncio.to_thread(  # 타이포 수정
+                response_p2 = await asyncio.to_thread(
                     self._client.responses.create,
                     model=model_name,
                     input=[
-                        {"role": "developer", "content": system_prompts.analysis_prompt},
+                        {"role": "developer", "content": system_prompts["analysis_prompt"]},  # 수정된 부분
                         {"role": "user", "content": text_content_p2}
                     ]
                 )
                 
-                # Part 2 응답 검증
+                # Part 2 응답 검증 (이전과 동일)
                 if response_p2.output and len(response_p2.output) > 0:
                     last_output = response_p2.output[-1]
                     if hasattr(last_output, 'type') and last_output.type == 'message':
@@ -275,16 +275,16 @@ class OpenAIService:
 [ANALYSIS PART 2 END]
 """
 
-                response_merge = await asyncio.to_thread(  # 타이포 수정
+                response_merge = await asyncio.to_thread(
                     self._client.responses.create,
                     model=model_name,
                     input=[
-                        {"role": "developer", "content": system_prompts.merge_prompt},
+                        {"role": "developer", "content": system_prompts["merge_prompt"]},  # 수정된 부분
                         {"role": "user", "content": combined_analysis_input}
                     ]
                 )
 
-                # 병합 응답 검증
+                # 병합 응답 검증 (이전과 동일)
                 if response_merge.output and len(response_merge.output) > 0:
                     last_output = response_merge.output[-1]
                     if hasattr(last_output, 'type') and last_output.type == 'message':
@@ -314,7 +314,7 @@ class OpenAIService:
                         raise Exception(f"Merge: Invalid output type")
                 else:
                     raise Exception(f"Merge: No output from model")
-            
+        
             except Exception as e:
                 error_msg = str(e)
                 

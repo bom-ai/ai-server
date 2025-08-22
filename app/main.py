@@ -15,7 +15,7 @@ from app.core.logging_config import setup_logging
 load_dotenv()
 
 # 로깅 설정
-setup_logging()  # 상세한 로그를 위해 DEBUG 레벨
+setup_logging()  # INFO level logging
 
 
 def create_application() -> FastAPI:
