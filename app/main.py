@@ -1,17 +1,21 @@
 """
 bo:matic server - FastAPI 애플리케이션 진입점
 """
-import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+import pandas as pd
 
 from app.core.config import settings
 from app.api.v1.api import api_router
 from app.models.schemas import HealthResponse
+from app.core.logging_config import setup_logging
 
 # 환경변수 파일 로드
 load_dotenv()
+
+# 로깅 설정
+setup_logging(log_level="DEBUG")  # 상세한 로그를 위해 DEBUG 레벨
 
 
 def create_application() -> FastAPI:
@@ -26,9 +30,8 @@ def create_application() -> FastAPI:
     )
 
     origins = [
-        "https://bomatic.vercel.app",      # 배포된 프론트엔드 주소
-        "http://localhost:5173",         # 로컬에서 개발할 때 사용하는 주소
-        # 필요하다면 다른 주소도 추가
+        "https://bomatic.vercel.app",
+        "http://localhost:5173",
     ]
     
     # CORS 미들웨어 설정
@@ -54,6 +57,10 @@ app = create_application()
 @app.get("/")
 async def root():
     """루트 엔드포인트"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("Root endpoint accessed")  # 테스트 로그
+    
     return {
         "message": "Welcome to bo:matic service!", 
         "status": "running",
@@ -64,13 +71,17 @@ async def root():
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """헬스체크 엔드포인트"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("Health check requested")  # 테스트 로그
+    
     return HealthResponse(
         status="healthy", 
         timestamp=pd.Timestamp.now().isoformat()
     )
 
 
-# 개발 서버 실행용 (프로덕션에서는 gunicorn 등 사용)
+# 개발 서버 실행용
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
