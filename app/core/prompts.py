@@ -2,7 +2,7 @@
 시스템 프롬프트 관리
 for Google Gemini API
 """
-from typing import List, Literal
+from typing import List, Literal, Dict
 
 FGD_ANALYSIS_TEMPLATE_RAW = """
 ```
@@ -163,7 +163,7 @@ def format_items_list(items: List[str]) -> str:
 def generate_system_prompt_from_docx(
     file_content,  # bytes 또는 str을 받을 수 있도록 타입 힌트 제거
     template_type: Literal["raw", "refined"] = "refined"
-) -> tuple[str, str]:
+) -> Dict[str, str]:
     """
     DOCX 파일에서 추출한 테이블 구조를 기반으로 시스템 프롬프트 두 개를 생성합니다.
     
@@ -206,7 +206,10 @@ def generate_system_prompt_from_docx(
         # 2. 병합용 시스템 프롬프트 생성
         merge_prompt = SYSTEM_PROMPT_MERGE.format(items_list=custom_items_str)
         
-        return (analysis_prompt, merge_prompt)
+        return {
+            "analysis_prompt": analysis_prompt, 
+            "merge_prompt": merge_prompt
+          }
         
     except Exception as e:
         # 오류 발생 시 기본 프롬프트 반환
