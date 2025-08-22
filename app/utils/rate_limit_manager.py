@@ -238,8 +238,8 @@ class RateLimitManager:
 
 # OpenAI용 기본 설정
 OPENAI_DEFAULT_CONFIG = {
-    "gpt-5": {"semaphore": 2, "tpm": 30000, "rpm": 500},
-    "gpt-4o": {"semaphore": 3, "tpm": 30000, "rpm": 500}
+    "gpt-5": {"semaphore": 1, "tpm": 30000, "rpm": 500},
+    "gpt-4o": {"semaphore": 1, "tpm": 30000, "rpm": 500}
 }
 
 
