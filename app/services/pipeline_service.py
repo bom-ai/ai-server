@@ -37,10 +37,10 @@ class PipelineService:
         bucket = self.storage_client.bucket(self.bucket_name)
         blob = bucket.blob(blob_name)
 
-        # URL은 15분 동안 유효합니다.
+        # URL은 120분 동안 유효합니다.
         url = blob.generate_signed_url(
             version="v4",
-            expiration=timedelta(minutes=15),
+            expiration=timedelta(minutes=120),
             method="PUT",
             content_type="application/octet-stream", 
         )
